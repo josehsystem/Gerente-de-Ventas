@@ -23,7 +23,7 @@ VENTAS_MESES = {
     "FEBRERO": {"sheet_id": "1cPgQEFUx-6oId3-y3DAVwmwjaZozKu9L10D9uZnR7bE", "tab": "Hoja1"},
 }
 
-# NEGADOS + LISTA DE PRECIOS (TUS COLUMNAS REALES)
+# NEGADOS + LISTA DE PRECIOS
 SHEET_ID_NEGADOS = "12kXQRhkKS1ea5H60YGIFcWEFJ_qcKSoXSl3p59Hk7ck"
 SHEET_TAB_NEGADOS = "Hoja1"
 
@@ -66,13 +66,17 @@ def radius_from_sale(sale, min_r=4, max_r=18):
     return float(max(min_r, min(max_r, r)))
 
 def pick_sku_col(df: pd.DataFrame):
-    # Para ventas (si trae SKU)
     candidates = ["codigo", "código", "sku", "clave", "clave_art", "cve_art", "producto", "articulo", "artículo"]
     cols = {c.lower().strip(): c for c in df.columns}
     for c in candidates:
         if c.lower().strip() in cols:
             return cols[c.lower().strip()]
     return None
+
+def normalize_int_series(s):
+    # regresa Int64 (con NA) para comparar cve_vnd
+    x = pd.to_numeric(pd.Series(s), errors="coerce")
+    return x.round(0).astype("Int64")
 
 # =========================
 # LOADERS
@@ -108,6 +112,7 @@ def load_ventas(sheet_id: str, tab: str):
 
     df = ensure_col(df, "cve_cte", "")
     df = ensure_col(df, "vendedor", "")
+    df = ensure_col(df, "cve_vnd", None)   # <--- si lo agregaste en ventas, lo toma
     df = ensure_col(df, "fecha", "")
     df = ensure_col(df, "especie", "")
     df = ensure_col(df, "total", 0)
@@ -118,6 +123,10 @@ def load_ventas(sheet_id: str, tab: str):
     df["vendedor"] = df["vendedor"].astype(str).str.strip()
     df["especie"] = df["especie"].astype(str).str.strip()
     df["fecha"] = pd.to_datetime(df.get("fecha"), errors="coerce", dayfirst=True)
+
+    # normaliza cve_vnd si viene
+    if "cve_vnd" in df.columns:
+        df["cve_vnd"] = normalize_int_series(df["cve_vnd"])
 
     total_num = to_num(df["total"])
     if (total_num != 0).any():
@@ -132,7 +141,7 @@ def load_ventas(sheet_id: str, tab: str):
 @st.cache_data(ttl=300)
 def load_precios_serur():
     """
-    TU HOJA PRECIOS:
+    PRECIOS:
       tip_pre | cve_art | descri | precio | codigo_sat
     """
     df = pd.read_csv(gviz_csv_url(SHEET_ID_PRECIOS, SHEET_TAB_PRECIOS))
@@ -145,21 +154,19 @@ def load_precios_serur():
     df["cve_art"] = df["cve_art"].astype(str).str.strip()
     df["precio"] = pd.to_numeric(df["precio"], errors="coerce").fillna(0)
 
-    # si existe tip_pre, usar 1 (si existe)
     if "tip_pre" in df.columns:
         df["tip_pre"] = pd.to_numeric(df["tip_pre"], errors="coerce").fillna(0).astype(int)
         if (df["tip_pre"] == 1).any():
             df = df[df["tip_pre"] == 1].copy()
 
-    # por si hay duplicados por cve_art
     df = df.groupby("cve_art", as_index=False)["precio"].max()
     return df, None
 
 @st.cache_data(ttl=300)
 def load_negados_serur():
     """
-    TU HOJA NEGADOS:
-      folio | cve_art | (expression) | cve_alm
+    NEGADOS:
+      cve_vnd | folio | cve_art | (expression) | cve_alm
     donde (expression) = cantidad negada
     """
     df = pd.read_csv(gviz_csv_url(SHEET_ID_NEGADOS, SHEET_TAB_NEGADOS))
@@ -169,11 +176,14 @@ def load_negados_serur():
         return None, "No encontré cve_art en NEGADOS."
     if "(expression)" not in df.columns:
         return None, "No encontré (expression) en NEGADOS (ahí debe venir la cantidad negada)."
+    if "cve_vnd" not in df.columns:
+        return None, "No encontré cve_vnd (número de vendedor) en NEGADOS."
 
     df["cve_art"] = df["cve_art"].astype(str).str.strip()
     df["cant_negada"] = pd.to_numeric(df["(expression)"], errors="coerce").fillna(0)
+    df["cve_vnd"] = normalize_int_series(df["cve_vnd"])
 
-    return df[["cve_art", "cant_negada"]].copy(), None
+    return df[["cve_vnd", "cve_art", "cant_negada"]].copy(), None
 
 # =========================
 # ESTADO
@@ -254,7 +264,7 @@ def dashboard_screen(mes: str):
     ventas = load_ventas(cfg["sheet_id"], cfg["tab"])
     clientes = load_clientes()
 
-    # NEGADOS + PRECIOS (GLOBAL, SIEMPRE)
+    # NEGADOS + PRECIOS
     negados_df, err_neg = load_negados_serur()
     precios_df, err_pre = load_precios_serur()
 
@@ -296,7 +306,7 @@ def dashboard_screen(mes: str):
     )
 
     # -------------------------
-    # Ventas filtradas (SÍ por vendedor/especie)
+    # Ventas filtradas
     # -------------------------
     vend_sel_str = [str(x).strip() for x in vendedor_sel]
     dfv = ventas[ventas["vendedor"].isin(vend_sel_str)].copy()
@@ -304,7 +314,7 @@ def dashboard_screen(mes: str):
         dfv = dfv[dfv["especie"].isin([str(x) for x in especie_sel])]
 
     # -------------------------
-    # SKUs únicos vendidos (solo 1 vendedor seleccionado)
+    # SKUs únicos (solo 1 vendedor seleccionado)
     # -------------------------
     sku_unicos = None
     mostrar_skus = (modo == "Elegir" and isinstance(vendedor_sel, list) and len(vendedor_sel) == 1)
@@ -346,7 +356,9 @@ def dashboard_screen(mes: str):
     if show_no_sales and max_no_sales > 0 and len(df_no_sales) > max_no_sales:
         df_no_sales = df_no_sales.head(int(max_no_sales))
 
+    # =========================
     # KPIs de ventas
+    # =========================
     venta_total = float(df_sales["venta_sin_iva"].sum()) if not df_sales.empty else 0.0
     clientes_con_venta = int(df_sales["cve_cte"].nunique()) if not df_sales.empty else 0
     ticket_prom = (venta_total / clientes_con_venta) if clientes_con_venta else 0.0
@@ -354,13 +366,34 @@ def dashboard_screen(mes: str):
     cobertura = (clientes_con_venta / clientes_asignados * 100) if clientes_asignados else 0.0
 
     # =========================
-    # NEGADOS (SIEMPRE GLOBAL: NO FILTRA POR VENDEDOR NI ESPECIE)
+    # NEGADOS (AHORA SÍ FILTRA POR VENDEDOR cve_vnd)
     # =========================
     negado_valor = 0.0
     faltan_precios = 0
 
+    # 1) obtenemos cve_vnd seleccionados
+    selected_cve_vnd = None
+    if modo == "Todos":
+        selected_cve_vnd = None  # no filtra (global real)
+    else:
+        # si VENTAS tiene cve_vnd, lo usamos para mapear vendedor->cve_vnd
+        if "cve_vnd" in ventas.columns and ventas["cve_vnd"].notna().any():
+            map_df = ventas[["vendedor", "cve_vnd"]].dropna().copy()
+            map_df["vendedor"] = map_df["vendedor"].astype(str).str.strip()
+            map_df["cve_vnd"] = normalize_int_series(map_df["cve_vnd"])
+            selected_cve_vnd = sorted(map_df[map_df["vendedor"].isin(vend_sel_str)]["cve_vnd"].dropna().unique().tolist())
+        else:
+            # fallback: intentar convertir "vendedor" a número si viene como "3", "7", etc.
+            selected_cve_vnd = sorted(normalize_int_series(vend_sel_str).dropna().unique().tolist())
+
     if err_neg is None and err_pre is None and negados_df is not None and precios_df is not None:
-        dfn = negados_df.merge(precios_df, on="cve_art", how="left")
+        dfn = negados_df.copy()
+
+        # 2) filtra por cve_vnd si aplica
+        if selected_cve_vnd is not None:
+            dfn = dfn[dfn["cve_vnd"].isin(selected_cve_vnd)].copy()
+
+        dfn = dfn.merge(precios_df, on="cve_art", how="left")
         dfn["precio"] = pd.to_numeric(dfn["precio"], errors="coerce").fillna(0)
 
         negado_valor = float((dfn["cant_negada"] * dfn["precio"]).sum())
@@ -369,25 +402,29 @@ def dashboard_screen(mes: str):
     pct_negado_vs_vendido = (negado_valor / venta_total * 100) if venta_total > 0 else 0.0
 
     # =========================
-    # KPIs
+    # KPIs (NEGADOS ABAJO, NO EN LA MISMA FILA)
     # =========================
     if mostrar_skus:
-        k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
+        k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Venta sin IVA", f"${venta_total:,.2f}")
         k2.metric("Clientes con venta", f"{clientes_con_venta:,}")
         k3.metric("Ticket prom.", f"${ticket_prom:,.2f}")
         k4.metric("Cobertura", f"{cobertura:,.1f}%")
         k5.metric("SKUs únicos (vendidos)", "N/D" if sku_unicos is None else f"{sku_unicos:,}")
-        k6.metric("$ Negado (GLOBAL)", f"${negado_valor:,.2f}")
-        k7.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
+
+        n1, n2 = st.columns([1, 1])
+        n1.metric("$ Negado", f"${negado_valor:,.2f}")
+        n2.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
     else:
-        k1, k2, k3, k4, k5, k6 = st.columns(6)
+        k1, k2, k3, k4 = st.columns(4)
         k1.metric("Venta sin IVA", f"${venta_total:,.2f}")
         k2.metric("Clientes con venta", f"{clientes_con_venta:,}")
         k3.metric("Ticket prom.", f"${ticket_prom:,.2f}")
         k4.metric("Cobertura", f"{cobertura:,.1f}%")
-        k5.metric("$ Negado (GLOBAL)", f"${negado_valor:,.2f}")
-        k6.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
+
+        n1, n2 = st.columns([1, 1])
+        n1.metric("$ Negado", f"${negado_valor:,.2f}")
+        n2.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
 
     if err_neg:
         st.caption(f"⚠️ NEGADOS: {err_neg}")
