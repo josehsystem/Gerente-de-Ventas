@@ -4,6 +4,7 @@ import folium
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 from urllib.parse import quote
+import calendar
 
 # =========================
 # CONFIG GENERAL
@@ -13,24 +14,33 @@ st.set_page_config(page_title="SERUR | Mapa de Ventas", layout="wide")
 LOGO_URL = "http://serur.geepok.com/n3xt/system/cxc/consulta/portal/logo-serur.png"
 PASSWORD = "Serur2026*"   # <-- CAMBIA AQUÍ
 
+IVA_FACTOR = 1.16
+
 # CLIENTES (BASE)
 SHEET_ID_CLIENTES = "13MWoCG2_KIuhP7NPFYnudbRx99PNTwgynBbwkArewz0"
 SHEET_TAB_CLIENTES = "Hoja1"
 
-# VENTAS POR MES
+# VENTAS POR MES (AÑO ACTUAL)
 VENTAS_MESES = {
     "ENERO": {"sheet_id": "1UpYQT6ErO3Xj3xdZ36IYJPRR9uDRQw-eYui9B_Y-JwU", "tab": "Hoja1"},
     "FEBRERO": {"sheet_id": "1cPgQEFUx-6oId3-y3DAVwmwjaZozKu9L10D9uZnR7bE", "tab": "Hoja1"},
 }
 
-# NEGADOS + LISTA DE PRECIOS
+# 2025 (HISTÓRICO)
+SHEET_ID_2025 = "1VO0rJ9ISg9JIORb3Ousx_MvTH0TVN_j2m1zbZUg-5yo"
+SHEET_TAB_2025 = "2025"
+
+# NEGADOS + PRECIOS
 SHEET_ID_NEGADOS = "12kXQRhkKS1ea5H60YGIFcWEFJ_qcKSoXSl3p59Hk7ck"
 SHEET_TAB_NEGADOS = "Hoja1"
 
 SHEET_ID_PRECIOS = "1u-e_R3AH9Qs9eiiWwbB5gJEvNFSxmaBZmjrGFtqT_8o"
 SHEET_TAB_PRECIOS = "Hoja1"
 
-IVA_FACTOR = 1.16
+MES_NUM = {
+    "ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6,
+    "JULIO": 7, "AGOSTO": 8, "SEPTIEMBRE": 9, "OCTUBRE": 10, "NOVIEMBRE": 11, "DICIEMBRE": 12
+}
 
 # =========================
 # HELPERS
@@ -66,7 +76,7 @@ def radius_from_sale(sale, min_r=4, max_r=18):
     return float(max(min_r, min(max_r, r)))
 
 def pick_sku_col(df: pd.DataFrame):
-    candidates = ["codigo", "código", "sku", "clave", "clave_art", "cve_art", "producto", "articulo", "artículo"]
+    candidates = ["clave", "codigo", "código", "sku", "clave_art", "cve_art", "producto", "articulo", "artículo"]
     cols = {c.lower().strip(): c for c in df.columns}
     for c in candidates:
         if c.lower().strip() in cols:
@@ -74,9 +84,16 @@ def pick_sku_col(df: pd.DataFrame):
     return None
 
 def normalize_int_series(s):
-    # regresa Int64 (con NA) para comparar cve_vnd
     x = pd.to_numeric(pd.Series(s), errors="coerce")
     return x.round(0).astype("Int64")
+
+def mtd_range(year: int, month: int, cut_day: int):
+    last_day = calendar.monthrange(year, month)[1]
+    d2 = min(cut_day, last_day)
+    start = pd.Timestamp(year, month, 1)
+    end_inclusive = pd.Timestamp(year, month, d2)
+    end_exclusive = end_inclusive + pd.Timedelta(days=1)
+    return start, end_exclusive
 
 # =========================
 # LOADERS
@@ -112,7 +129,7 @@ def load_ventas(sheet_id: str, tab: str):
 
     df = ensure_col(df, "cve_cte", "")
     df = ensure_col(df, "vendedor", "")
-    df = ensure_col(df, "cve_vnd", None)   # <--- si lo agregaste en ventas, lo toma
+    df = ensure_col(df, "cve_vnd", None)   # importante para comparativo/negados
     df = ensure_col(df, "fecha", "")
     df = ensure_col(df, "especie", "")
     df = ensure_col(df, "total", 0)
@@ -124,7 +141,6 @@ def load_ventas(sheet_id: str, tab: str):
     df["especie"] = df["especie"].astype(str).str.strip()
     df["fecha"] = pd.to_datetime(df.get("fecha"), errors="coerce", dayfirst=True)
 
-    # normaliza cve_vnd si viene
     if "cve_vnd" in df.columns:
         df["cve_vnd"] = normalize_int_series(df["cve_vnd"])
 
@@ -139,11 +155,27 @@ def load_ventas(sheet_id: str, tab: str):
     return df
 
 @st.cache_data(ttl=300)
+def load_ventas_2025():
+    df = pd.read_csv(gviz_csv_url(SHEET_ID_2025, SHEET_TAB_2025))
+    df.columns = df.columns.str.strip().str.lower()
+
+    # tu hoja 2025 trae: vendedor, fecha, clave (sku), total (con iva), cve_cte
+    df = ensure_col(df, "vendedor", None)  # num vendedor
+    df = ensure_col(df, "fecha", "")
+    df = ensure_col(df, "clave", "")
+    df = ensure_col(df, "cve_cte", "")
+    df = ensure_col(df, "total", 0)
+
+    df["vendedor"] = normalize_int_series(df["vendedor"])
+    df["cve_cte"] = df["cve_cte"].astype(str).str.strip()
+    df["clave"] = df["clave"].astype(str).str.strip()
+    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce", dayfirst=True)
+
+    df["venta_sin_iva"] = to_num(df["total"]) / IVA_FACTOR
+    return df
+
+@st.cache_data(ttl=300)
 def load_precios_serur():
-    """
-    PRECIOS:
-      tip_pre | cve_art | descri | precio | codigo_sat
-    """
     df = pd.read_csv(gviz_csv_url(SHEET_ID_PRECIOS, SHEET_TAB_PRECIOS))
     df.columns = df.columns.str.strip().str.lower()
 
@@ -164,20 +196,15 @@ def load_precios_serur():
 
 @st.cache_data(ttl=300)
 def load_negados_serur():
-    """
-    NEGADOS:
-      cve_vnd | folio | cve_art | (expression) | cve_alm
-    donde (expression) = cantidad negada
-    """
     df = pd.read_csv(gviz_csv_url(SHEET_ID_NEGADOS, SHEET_TAB_NEGADOS))
     df.columns = df.columns.str.strip().str.lower()
 
     if "cve_art" not in df.columns:
         return None, "No encontré cve_art en NEGADOS."
     if "(expression)" not in df.columns:
-        return None, "No encontré (expression) en NEGADOS (ahí debe venir la cantidad negada)."
+        return None, "No encontré (expression) en NEGADOS (cantidad negada)."
     if "cve_vnd" not in df.columns:
-        return None, "No encontré cve_vnd (número de vendedor) en NEGADOS."
+        return None, "No encontré cve_vnd en NEGADOS."
 
     df["cve_art"] = df["cve_art"].astype(str).str.strip()
     df["cant_negada"] = pd.to_numeric(df["(expression)"], errors="coerce").fillna(0)
@@ -262,9 +289,9 @@ def menu_screen():
 def dashboard_screen(mes: str):
     cfg = VENTAS_MESES[mes]
     ventas = load_ventas(cfg["sheet_id"], cfg["tab"])
+    ventas_2025 = load_ventas_2025()
     clientes = load_clientes()
 
-    # NEGADOS + PRECIOS
     negados_df, err_neg = load_negados_serur()
     precios_df, err_pre = load_precios_serur()
 
@@ -284,7 +311,7 @@ def dashboard_screen(mes: str):
 
     especies = sorted([e for e in ventas["especie"].dropna().unique().tolist() if clean_text(e) != ""])
 
-    c1, c2, c3, c4, c5 = st.columns([2.4, 2.8, 1.6, 2.6, 2.0])
+    c1, c2, c3, c4, c5, c6 = st.columns([2.2, 2.6, 1.6, 2.4, 2.0, 2.2])
     with c1:
         modo = st.radio("Vendedores", ["Todos", "Elegir"], horizontal=True)
     with c2:
@@ -295,6 +322,8 @@ def dashboard_screen(mes: str):
         show_no_sales = st.checkbox("Mostrar clientes sin compra (del vendedor)", value=False)
     with c5:
         max_no_sales = st.slider("Máx sin compra", 0, 10000, 1500, 250, disabled=not show_no_sales)
+    with c6:
+        corte = st.date_input("Fecha corte (MTD)", value=pd.Timestamp.today().date())
 
     vendedor_sel = vendedores if modo == "Todos" else st.multiselect("Vendedor(es)", options=vendedores, default=vendedores)
     solo_top = st.number_input("Top clientes con venta (0=todos)", min_value=0, value=0, step=50)
@@ -306,22 +335,12 @@ def dashboard_screen(mes: str):
     )
 
     # -------------------------
-    # Ventas filtradas
+    # Ventas filtradas (año actual)
     # -------------------------
     vend_sel_str = [str(x).strip() for x in vendedor_sel]
     dfv = ventas[ventas["vendedor"].isin(vend_sel_str)].copy()
     if especie_sel:
         dfv = dfv[dfv["especie"].isin([str(x) for x in especie_sel])]
-
-    # -------------------------
-    # SKUs únicos (solo 1 vendedor seleccionado)
-    # -------------------------
-    sku_unicos = None
-    mostrar_skus = (modo == "Elegir" and isinstance(vendedor_sel, list) and len(vendedor_sel) == 1)
-    if mostrar_skus and not dfv.empty:
-        sku_col = pick_sku_col(dfv)
-        if sku_col:
-            sku_unicos = int(dfv[sku_col].astype(str).str.strip().replace("", pd.NA).dropna().nunique())
 
     # -------------------------
     # Agregación para mapa
@@ -357,7 +376,7 @@ def dashboard_screen(mes: str):
         df_no_sales = df_no_sales.head(int(max_no_sales))
 
     # =========================
-    # KPIs de ventas
+    # KPIs de ventas (AÑO ACTUAL)
     # =========================
     venta_total = float(df_sales["venta_sin_iva"].sum()) if not df_sales.empty else 0.0
     clientes_con_venta = int(df_sales["cve_cte"].nunique()) if not df_sales.empty else 0
@@ -366,30 +385,26 @@ def dashboard_screen(mes: str):
     cobertura = (clientes_con_venta / clientes_asignados * 100) if clientes_asignados else 0.0
 
     # =========================
-    # NEGADOS (AHORA SÍ FILTRA POR VENDEDOR cve_vnd)
+    # NEGADOS (FILTRA POR cve_vnd según vendedor elegido)
     # =========================
     negado_valor = 0.0
     faltan_precios = 0
 
-    # 1) obtenemos cve_vnd seleccionados
+    # cve_vnd seleccionados
     selected_cve_vnd = None
     if modo == "Todos":
-        selected_cve_vnd = None  # no filtra (global real)
+        selected_cve_vnd = None
     else:
-        # si VENTAS tiene cve_vnd, lo usamos para mapear vendedor->cve_vnd
         if "cve_vnd" in ventas.columns and ventas["cve_vnd"].notna().any():
             map_df = ventas[["vendedor", "cve_vnd"]].dropna().copy()
             map_df["vendedor"] = map_df["vendedor"].astype(str).str.strip()
             map_df["cve_vnd"] = normalize_int_series(map_df["cve_vnd"])
             selected_cve_vnd = sorted(map_df[map_df["vendedor"].isin(vend_sel_str)]["cve_vnd"].dropna().unique().tolist())
         else:
-            # fallback: intentar convertir "vendedor" a número si viene como "3", "7", etc.
             selected_cve_vnd = sorted(normalize_int_series(vend_sel_str).dropna().unique().tolist())
 
     if err_neg is None and err_pre is None and negados_df is not None and precios_df is not None:
         dfn = negados_df.copy()
-
-        # 2) filtra por cve_vnd si aplica
         if selected_cve_vnd is not None:
             dfn = dfn[dfn["cve_vnd"].isin(selected_cve_vnd)].copy()
 
@@ -402,29 +417,61 @@ def dashboard_screen(mes: str):
     pct_negado_vs_vendido = (negado_valor / venta_total * 100) if venta_total > 0 else 0.0
 
     # =========================
-    # KPIs (NEGADOS ABAJO, NO EN LA MISMA FILA)
+    # COMPARATIVO 2025 vs ACTUAL (MTD a la misma fecha)
     # =========================
-    if mostrar_skus:
-        k1, k2, k3, k4, k5 = st.columns(5)
-        k1.metric("Venta sin IVA", f"${venta_total:,.2f}")
-        k2.metric("Clientes con venta", f"{clientes_con_venta:,}")
-        k3.metric("Ticket prom.", f"${ticket_prom:,.2f}")
-        k4.metric("Cobertura", f"{cobertura:,.1f}%")
-        k5.metric("SKUs únicos (vendidos)", "N/D" if sku_unicos is None else f"{sku_unicos:,}")
+    month_num = MES_NUM.get(mes, None)
+    if month_num is None:
+        st.error("Mes no reconocido para comparativo.")
+        st.stop()
 
-        n1, n2 = st.columns([1, 1])
-        n1.metric("$ Negado", f"${negado_valor:,.2f}")
-        n2.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
-    else:
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Venta sin IVA", f"${venta_total:,.2f}")
-        k2.metric("Clientes con venta", f"{clientes_con_venta:,}")
-        k3.metric("Ticket prom.", f"${ticket_prom:,.2f}")
-        k4.metric("Cobertura", f"{cobertura:,.1f}%")
+    cut_day = int(pd.Timestamp(corte).day)
+    year_actual = int(pd.Timestamp.today().year)  # si quieres fijo, cámbialo
+    start_act, end_act = mtd_range(year_actual, month_num, cut_day)
+    start_25, end_25 = mtd_range(2025, month_num, cut_day)
 
-        n1, n2 = st.columns([1, 1])
-        n1.metric("$ Negado", f"${negado_valor:,.2f}")
-        n2.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
+    # ACTUAL MTD (sobre dfv, pero filtrando por fecha)
+    dfv_mtd = dfv.copy()
+    if "fecha" in dfv_mtd.columns:
+        dfv_mtd = dfv_mtd[(dfv_mtd["fecha"] >= start_act) & (dfv_mtd["fecha"] < end_act)].copy()
+
+    # 2025 MTD filtrando por cve_vnd (ventas_2025.vendedor)
+    df25 = ventas_2025.copy()
+    df25 = df25[(df25["fecha"] >= start_25) & (df25["fecha"] < end_25)].copy()
+    if selected_cve_vnd is not None:
+        df25 = df25[df25["vendedor"].isin(selected_cve_vnd)].copy()
+
+    venta_act_mtd = float(dfv_mtd["venta_sin_iva"].sum()) if not dfv_mtd.empty else 0.0
+    venta_25_mtd = float(df25["venta_sin_iva"].sum()) if not df25.empty else 0.0
+    var_mtd = ((venta_act_mtd / venta_25_mtd) - 1) * 100 if venta_25_mtd > 0 else 0.0
+
+    clientes_act_mtd = int(dfv_mtd["cve_cte"].astype(str).nunique()) if not dfv_mtd.empty else 0
+    clientes_25_mtd = int(df25["cve_cte"].astype(str).nunique()) if not df25.empty else 0
+
+    sku_col_act = pick_sku_col(dfv_mtd)
+    skus_act_mtd = int(dfv_mtd[sku_col_act].astype(str).str.strip().replace("", pd.NA).dropna().nunique()) if (sku_col_act and not dfv_mtd.empty) else 0
+    skus_25_mtd = int(df25["clave"].astype(str).str.strip().replace("", pd.NA).dropna().nunique()) if not df25.empty else 0
+
+    # =========================
+    # KPIs (NEGADOS ABAJO)
+    # =========================
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Venta sin IVA", f"${venta_total:,.2f}")
+    k2.metric("Clientes con venta", f"{clientes_con_venta:,}")
+    k3.metric("Ticket prom.", f"${ticket_prom:,.2f}")
+    k4.metric("Cobertura", f"{cobertura:,.1f}%")
+
+    n1, n2 = st.columns([1, 1])
+    n1.metric("$ Negado", f"${negado_valor:,.2f}")
+    n2.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
+
+    # Comparativo (debajo, en bloque separado)
+    st.markdown("### Comparativo MTD (a la misma fecha) — 2025 vs Año actual")
+    cA, cB, cC, cD, cE = st.columns(5)
+    cA.metric("Venta MTD (Actual)", f"${venta_act_mtd:,.2f}")
+    cB.metric("Venta MTD (2025)", f"${venta_25_mtd:,.2f}")
+    cC.metric("Variación vs 2025", f"{var_mtd:,.2f}%")
+    cD.metric("Clientes MTD (Actual / 2025)", f"{clientes_act_mtd:,} / {clientes_25_mtd:,}")
+    cE.metric("SKUs MTD (Actual / 2025)", f"{skus_act_mtd:,} / {skus_25_mtd:,}")
 
     if err_neg:
         st.caption(f"⚠️ NEGADOS: {err_neg}")
@@ -432,6 +479,8 @@ def dashboard_screen(mes: str):
         st.caption(f"⚠️ PRECIOS: {err_pre}")
     if faltan_precios > 0:
         st.caption(f"⚠️ {faltan_precios:,} renglones negados quedaron sin precio (precio=0). Revisa lista de precios.")
+    if ("cve_vnd" not in ventas.columns) or (ventas["cve_vnd"].isna().all()):
+        st.caption("⚠️ Para comparar por vendedor con 2025 te conviene tener cve_vnd en tu hoja de ventas actual.")
 
     st.divider()
 
