@@ -672,6 +672,38 @@ def dashboard_screen(mes: str):
         }
     )
 
+    # =========================
+    # EXPORT (NO ATENDIDOS) - SOLO CUANDO ES POR VENDEDOR (ELEGIR)
+    # =========================
+    if (modo != "Todos") and show_no_sales:
+        st.markdown("### Exportar no atendidos (con coordenadas)")
+
+        export_df = df_nc[["cve_cte", "nombre", "vendedor_cliente", "latitud", "longitud"]].copy()
+
+        # CSV
+        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            label="⬇️ Descargar CSV (no atendidos)",
+            data=csv_bytes,
+            file_name=f"no_atendidos_{mes}_{'_'.join(vend_sel_str)[:60]}.csv",
+            mime="text/csv",
+        )
+
+        # Excel
+        try:
+            from io import BytesIO
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                export_df.to_excel(writer, sheet_name="no_atendidos", index=False)
+            st.download_button(
+                label="⬇️ Descargar Excel (no atendidos)",
+                data=output.getvalue(),
+                file_name=f"no_atendidos_{mes}_{'_'.join(vend_sel_str)[:60]}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        except Exception as e:
+            st.caption(f"(Excel no disponible: {e})")
+
 # =========================
 # ROUTER
 # =========================
