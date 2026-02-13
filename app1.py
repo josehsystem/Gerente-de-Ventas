@@ -519,7 +519,7 @@ def especies_screen(mes: str):
             st.rerun()
     with topbar2:
         st.title(f"Ventas por Especie | {mes}")
-        st.caption("Tarjetas ordenadas + Pareto 80/20 + ‘este compa no está vendiendo esto’.")
+        st.caption("Tarjetas ordenadas + Pareto 80/20 + ‘No está vendiendo esto’.")
 
     vendedores = sorted([v for v in ventas["vendedor"].dropna().unique().tolist() if clean_text(v) != ""])
     if not vendedores:
@@ -867,3 +867,4 @@ try:
 except Exception:
     st.error("Tronó la app. Aquí está el error para corregirlo rápido:")
     st.code(traceback.format_exc())
+
