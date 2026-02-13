@@ -154,13 +154,6 @@ def safe_logo(width=220):
         st.image(LOGO_FALLBACK, width=width)
 
 def pareto_80_by_especie(df_sales: pd.DataFrame, threshold=0.80):
-    """
-    Regresa DataFrame por especie con:
-    - venta_sin_iva
-    - pct
-    - cum_pct
-    - is_80  (incluye la especie que cruza el 80)
-    """
     if df_sales.empty:
         return pd.DataFrame(columns=["especie", "venta_sin_iva", "pct", "cum_pct", "is_80"])
 
@@ -178,7 +171,6 @@ def pareto_80_by_especie(df_sales: pd.DataFrame, threshold=0.80):
     x["cum_pct"] = x["pct"].cumsum()
     x["is_80"] = x["cum_pct"] <= float(threshold)
 
-    # incluye la especie que "cruza" el umbral
     if (~x["is_80"]).any():
         idx = x.index[~x["is_80"]][0]
         x.loc[idx, "is_80"] = True
@@ -325,6 +317,8 @@ if "mes" not in st.session_state:
     st.session_state.mes = "ENERO"
 if "last_filters" not in st.session_state:
     st.session_state.last_filters = {}
+if "next_view" not in st.session_state:
+    st.session_state.next_view = "dashboard"  # a dónde ir después de elegir mes
 
 # =========================
 # LOGIN
@@ -385,42 +379,55 @@ def login_screen():
         st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# MENU
+# MENU (solo vistas)
 # =========================
 def menu_screen():
     safe_logo(width=220)
     st.title("Menú principal")
-    st.caption("Elige el mes y la vista.")
+    st.caption("Elige la vista. Después eliges el mes.")
 
-    # MES
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("📌 ENERO"):
-            st.session_state.mes = "ENERO"
-            st.session_state.view = "menu"
-            st.rerun()
-    with col2:
-        if st.button("📌 FEBRERO"):
-            st.session_state.mes = "FEBRERO"
-            st.session_state.view = "menu"
-            st.rerun()
-
-    st.divider()
-
-    # VISTAS
     a, b, c = st.columns([1.3, 1.3, 1.1])
     with a:
         if st.button("📍 Mapa de ventas"):
-            st.session_state.view = "dashboard"
+            st.session_state.next_view = "dashboard"
+            st.session_state.view = "pick_month"
             st.rerun()
     with b:
         if st.button("🧩 Ventas por especie"):
-            st.session_state.view = "especies"
+            st.session_state.next_view = "especies"
+            st.session_state.view = "pick_month"
             st.rerun()
     with c:
         if st.button("🚪 Cerrar sesión"):
             st.session_state.auth_ok = False
             st.session_state.view = "login"
+            st.rerun()
+
+# =========================
+# PANTALLA ELEGIR MES (para cualquier vista)
+# =========================
+def pick_month_screen():
+    safe_logo(width=220)
+
+    top = st.columns([1, 4])
+    with top[0]:
+        if st.button("⬅ Volver"):
+            st.session_state.view = "menu"
+            st.rerun()
+    with top[1]:
+        st.title("Elige el mes")
+        st.caption("Selecciona el mes y te llevo a la vista.")
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("📌 ENERO"):
+            st.session_state.mes = "ENERO"
+            st.session_state.view = st.session_state.next_view
+            st.rerun()
+    with col2:
+        if st.button("📌 FEBRERO"):
+            st.session_state.mes = "FEBRERO"
+            st.session_state.view = st.session_state.next_view
             st.rerun()
 
 # =========================
@@ -498,7 +505,7 @@ def negados_detail_screen():
     )
 
 # =========================
-# VISTA: VENTAS POR ESPECIE (NUEVA)
+# VISTA: VENTAS POR ESPECIE
 # =========================
 def especies_screen(mes: str):
     cfg = VENTAS_MESES[mes]
@@ -507,8 +514,8 @@ def especies_screen(mes: str):
     safe_logo(width=190)
     topbar1, topbar2 = st.columns([1, 3])
     with topbar1:
-        if st.button("⬅ Regresar al menú"):
-            st.session_state.view = "menu"
+        if st.button("⬅ Regresar"):
+            st.session_state.view = "pick_month"
             st.rerun()
     with topbar2:
         st.title(f"Ventas por Especie | {mes}")
@@ -532,7 +539,6 @@ def especies_screen(mes: str):
         st.warning("Ese vendedor no tiene ventas en este mes.")
         return
 
-    # Por especie (vendedor)
     by_esp = dfv.groupby("especie", as_index=False).agg(
         venta_sin_iva=("venta_sin_iva", "sum"),
         clientes=("cve_cte", lambda s: pd.Series(s).astype(str).nunique()),
@@ -542,14 +548,12 @@ def especies_screen(mes: str):
     total_vnd = float(by_esp["venta_sin_iva"].sum()) if not by_esp.empty else 0.0
     by_esp["pct_vnd"] = (by_esp["venta_sin_iva"] / total_vnd * 100) if total_vnd > 0 else 0.0
 
-    # Pareto vendedor y global
     p_vnd = pareto_80_by_especie(dfv, threshold=float(umbral))
     p_glb = pareto_80_by_especie(ventas, threshold=float(umbral))
 
     set_80_vnd = set(p_vnd[p_vnd["is_80"]]["especie"].astype(str).tolist())
     especies_80_global = p_glb[p_glb["is_80"]]["especie"].astype(str).tolist()
 
-    # Oportunidad: especies del 80/20 global que vendedor trae 0 (o <= min_no_vende)
     map_vnd = dict(zip(by_esp["especie"].astype(str), by_esp["venta_sin_iva"].astype(float)))
     faltantes = []
     for esp in especies_80_global:
@@ -557,7 +561,6 @@ def especies_screen(mes: str):
         if v <= float(min_no_vende):
             faltantes.append([esp, v])
 
-    # KPIs
     k1, k2, k3, k4 = st.columns([2, 1.2, 1.2, 2])
     k1.metric("Venta sin IVA", f"${total_vnd:,.2f}")
     k2.metric("Especies", f"{by_esp['especie'].nunique():,}")
@@ -575,9 +578,7 @@ def especies_screen(mes: str):
             df_f.sort_values("venta_vendedor", ascending=True),
             use_container_width=True,
             hide_index=True,
-            column_config={
-                "venta_vendedor": st.column_config.NumberColumn("Venta vendedor", format="$ %0.2f")
-            },
+            column_config={"venta_vendedor": st.column_config.NumberColumn("Venta vendedor", format="$ %0.2f")},
         )
 
     st.divider()
@@ -585,7 +586,6 @@ def especies_screen(mes: str):
     st.subheader("Tarjetas por especie (ordenadas por venta)")
     color_map = make_color_map(by_esp["especie"].astype(str))
 
-    # Grid 4 columnas
     cols = st.columns(4)
     for i, r in by_esp.iterrows():
         esp = clean_text(r.get("especie", ""))
@@ -604,7 +604,6 @@ def especies_screen(mes: str):
           <div class="meta">{pct:,.1f}% del vendedor • {cli:,} clientes</div>
         </div>
         """
-
         with cols[i % 4]:
             st.markdown(html, unsafe_allow_html=True)
 
@@ -623,7 +622,7 @@ def especies_screen(mes: str):
     )
 
 # =========================
-# DASHBOARD (MAPA) - SIN CAMBIOS
+# DASHBOARD (MAPA) - COMO LO TENÍAS
 # =========================
 def dashboard_screen(mes: str):
     cfg = VENTAS_MESES[mes]
@@ -637,8 +636,8 @@ def dashboard_screen(mes: str):
 
     topbar1, topbar2 = st.columns([1, 3])
     with topbar1:
-        if st.button("⬅ Regresar al menú"):
-            st.session_state.view = "menu"
+        if st.button("⬅ Regresar"):
+            st.session_state.view = "pick_month"
             st.rerun()
     with topbar2:
         st.title(f"Mapa de Ventas | {mes}")
@@ -853,6 +852,8 @@ try:
         login_screen()
     elif st.session_state.view == "menu":
         menu_screen()
+    elif st.session_state.view == "pick_month":
+        pick_month_screen()
     elif st.session_state.view == "dashboard":
         dashboard_screen(st.session_state.mes)
     elif st.session_state.view == "especies":
