@@ -21,7 +21,8 @@ ACCENT_HOVER = "#0b2f68"
 # =========================
 # CSS GLOBAL
 # =========================
-st.markdown(f"""
+st.markdown(
+    f"""
 <style>
 .block-container{{ padding-top: 1.2rem; padding-bottom: 2rem; }}
 
@@ -61,8 +62,45 @@ div.stButton > button:active {{
 [data-testid="stNumberInput"] input {{
   border-radius: 10px !important;
 }}
+
+.card {{
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 14px;
+  padding: 14px 14px 12px 14px;
+  background: rgba(255,255,255,0.70);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.06);
+  height: 128px;
+  overflow: hidden;
+}}
+.card .title {{
+  font-weight: 900;
+  font-size: 14px;
+  line-height: 1.2;
+  margin-bottom: 6px;
+}}
+.card .money {{
+  font-weight: 900;
+  font-size: 20px;
+  margin-bottom: 4px;
+}}
+.card .meta {{
+  font-size: 12px;
+  opacity: 0.85;
+}}
+.badge {{
+  display: inline-block;
+  font-weight: 800;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(13,59,130,0.10);
+  color: {ACCENT};
+  border: 1px solid rgba(13,59,130,0.18);
+}}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # =========================
 # HELPERS
@@ -114,6 +152,38 @@ def safe_logo(width=220):
         st.image(LOGO_URL, width=width)
     except Exception:
         st.image(LOGO_FALLBACK, width=width)
+
+def pareto_80_by_especie(df_sales: pd.DataFrame, threshold=0.80):
+    """
+    Regresa DataFrame por especie con:
+    - venta_sin_iva
+    - pct
+    - cum_pct
+    - is_80  (incluye la especie que cruza el 80)
+    """
+    if df_sales.empty:
+        return pd.DataFrame(columns=["especie", "venta_sin_iva", "pct", "cum_pct", "is_80"])
+
+    x = df_sales.groupby("especie", as_index=False).agg(venta_sin_iva=("venta_sin_iva", "sum"))
+    x = x.sort_values("venta_sin_iva", ascending=False).reset_index(drop=True)
+
+    total = float(x["venta_sin_iva"].sum()) if not x.empty else 0.0
+    if total <= 0:
+        x["pct"] = 0.0
+        x["cum_pct"] = 0.0
+        x["is_80"] = False
+        return x
+
+    x["pct"] = x["venta_sin_iva"] / total
+    x["cum_pct"] = x["pct"].cumsum()
+    x["is_80"] = x["cum_pct"] <= float(threshold)
+
+    # incluye la especie que "cruza" el umbral
+    if (~x["is_80"]).any():
+        idx = x.index[~x["is_80"]][0]
+        x.loc[idx, "is_80"] = True
+
+    return x
 
 # =========================
 # DATA SOURCES
@@ -257,11 +327,11 @@ if "last_filters" not in st.session_state:
     st.session_state.last_filters = {}
 
 # =========================
-# LOGIN (CENTRADO REAL con columnas)
+# LOGIN
 # =========================
 def login_screen():
-    # CSS SOLO DEL LOGIN
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <style>
     .login-card {{
         width: min(560px, 92vw);
@@ -287,16 +357,15 @@ def login_screen():
         margin-bottom: 18px;
         color: rgba(13,59,130,0.85);
     }}
-    /* que el input quede del ancho de la card */
     .login-card [data-testid="stTextInput"] {{
         width: 100%;
     }}
     </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
-    # Centrado con columnas (esto NO se desacomoda)
     left, mid, right = st.columns([1.6, 1.0, 1.6])
-
     with mid:
         st.markdown('<div class="login-card">', unsafe_allow_html=True)
         safe_logo(width=240)
@@ -313,7 +382,7 @@ def login_screen():
             else:
                 st.error("Contraseña incorrecta")
 
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
 # MENU
@@ -321,20 +390,34 @@ def login_screen():
 def menu_screen():
     safe_logo(width=220)
     st.title("Menú principal")
-    st.caption("Elige el mes para ver el mapa y KPIs.")
+    st.caption("Elige el mes y la vista.")
 
-    col1, col2, col3 = st.columns([1, 1, 1.2])
+    # MES
+    col1, col2 = st.columns([1, 1])
     with col1:
         if st.button("📌 ENERO"):
             st.session_state.mes = "ENERO"
-            st.session_state.view = "dashboard"
+            st.session_state.view = "menu"
             st.rerun()
     with col2:
         if st.button("📌 FEBRERO"):
             st.session_state.mes = "FEBRERO"
+            st.session_state.view = "menu"
+            st.rerun()
+
+    st.divider()
+
+    # VISTAS
+    a, b, c = st.columns([1.3, 1.3, 1.1])
+    with a:
+        if st.button("📍 Mapa de ventas"):
             st.session_state.view = "dashboard"
             st.rerun()
-    with col3:
+    with b:
+        if st.button("🧩 Ventas por especie"):
+            st.session_state.view = "especies"
+            st.rerun()
+    with c:
         if st.button("🚪 Cerrar sesión"):
             st.session_state.auth_ok = False
             st.session_state.view = "login"
@@ -411,11 +494,136 @@ def negados_detail_screen():
             "precio": st.column_config.NumberColumn("precio", format="$ %0.2f"),
             "valor": st.column_config.NumberColumn("valor", format="$ %0.2f"),
             "pct_total": st.column_config.NumberColumn("% del total", format="%0.2f"),
-        }
+        },
     )
 
 # =========================
-# DASHBOARD
+# VISTA: VENTAS POR ESPECIE (NUEVA)
+# =========================
+def especies_screen(mes: str):
+    cfg = VENTAS_MESES[mes]
+    ventas = load_ventas(cfg["sheet_id"], cfg["tab"])
+
+    safe_logo(width=190)
+    topbar1, topbar2 = st.columns([1, 3])
+    with topbar1:
+        if st.button("⬅ Regresar al menú"):
+            st.session_state.view = "menu"
+            st.rerun()
+    with topbar2:
+        st.title(f"Ventas por Especie | {mes}")
+        st.caption("Tarjetas ordenadas + Pareto 80/20 + ‘este compa no está vendiendo esto’.")
+
+    vendedores = sorted([v for v in ventas["vendedor"].dropna().unique().tolist() if clean_text(v) != ""])
+    if not vendedores:
+        st.error("No se encontraron vendedores en VENTAS.")
+        return
+
+    c1, c2, c3 = st.columns([2.1, 1.2, 1.7])
+    with c1:
+        vendedor_sel = st.selectbox("Vendedor", options=vendedores, index=0)
+    with c2:
+        umbral = st.slider("Pareto", 0.60, 0.95, 0.80, 0.05)
+    with c3:
+        min_no_vende = st.number_input("‘No vende’ si $ <=", min_value=0, value=0, step=100)
+
+    dfv = ventas[ventas["vendedor"] == str(vendedor_sel).strip()].copy()
+    if dfv.empty:
+        st.warning("Ese vendedor no tiene ventas en este mes.")
+        return
+
+    # Por especie (vendedor)
+    by_esp = dfv.groupby("especie", as_index=False).agg(
+        venta_sin_iva=("venta_sin_iva", "sum"),
+        clientes=("cve_cte", lambda s: pd.Series(s).astype(str).nunique()),
+        renglones=("especie", "count"),
+    ).sort_values("venta_sin_iva", ascending=False).reset_index(drop=True)
+
+    total_vnd = float(by_esp["venta_sin_iva"].sum()) if not by_esp.empty else 0.0
+    by_esp["pct_vnd"] = (by_esp["venta_sin_iva"] / total_vnd * 100) if total_vnd > 0 else 0.0
+
+    # Pareto vendedor y global
+    p_vnd = pareto_80_by_especie(dfv, threshold=float(umbral))
+    p_glb = pareto_80_by_especie(ventas, threshold=float(umbral))
+
+    set_80_vnd = set(p_vnd[p_vnd["is_80"]]["especie"].astype(str).tolist())
+    especies_80_global = p_glb[p_glb["is_80"]]["especie"].astype(str).tolist()
+
+    # Oportunidad: especies del 80/20 global que vendedor trae 0 (o <= min_no_vende)
+    map_vnd = dict(zip(by_esp["especie"].astype(str), by_esp["venta_sin_iva"].astype(float)))
+    faltantes = []
+    for esp in especies_80_global:
+        v = float(map_vnd.get(str(esp), 0.0))
+        if v <= float(min_no_vende):
+            faltantes.append([esp, v])
+
+    # KPIs
+    k1, k2, k3, k4 = st.columns([2, 1.2, 1.2, 2])
+    k1.metric("Venta sin IVA", f"${total_vnd:,.2f}")
+    k2.metric("Especies", f"{by_esp['especie'].nunique():,}")
+    k3.metric("Clientes", f"{dfv['cve_cte'].astype(str).nunique():,}")
+    k4.metric(f"Especies en {int(umbral*100)}% (vendedor)", f"{len(set_80_vnd):,}")
+
+    st.divider()
+
+    st.subheader("Este compa NO está vendiendo esto (especies clave del mes)")
+    if not faltantes:
+        st.success("✅ Bien: sí trae venta en todas (o casi todas) las especies del 80/20 global.")
+    else:
+        df_f = pd.DataFrame(faltantes, columns=["especie", "venta_vendedor"])
+        st.dataframe(
+            df_f.sort_values("venta_vendedor", ascending=True),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "venta_vendedor": st.column_config.NumberColumn("Venta vendedor", format="$ %0.2f")
+            },
+        )
+
+    st.divider()
+
+    st.subheader("Tarjetas por especie (ordenadas por venta)")
+    color_map = make_color_map(by_esp["especie"].astype(str))
+
+    # Grid 4 columnas
+    cols = st.columns(4)
+    for i, r in by_esp.iterrows():
+        esp = clean_text(r.get("especie", ""))
+        val = float(r.get("venta_sin_iva", 0) or 0.0)
+        pct = float(r.get("pct_vnd", 0) or 0.0)
+        cli = int(r.get("clientes", 0) or 0)
+        is80 = esp in set_80_vnd
+
+        border = color_map.get(esp, ACCENT)
+        badge = '<span class="badge">⭐ 80/20</span>' if is80 else ""
+
+        html = f"""
+        <div class="card" style="border-left: 10px solid {border};">
+          <div class="title">{esp} {badge}</div>
+          <div class="money">${val:,.2f}</div>
+          <div class="meta">{pct:,.1f}% del vendedor • {cli:,} clientes</div>
+        </div>
+        """
+
+        with cols[i % 4]:
+            st.markdown(html, unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("Tabla (por si la ocupas)")
+    st.dataframe(
+        by_esp,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "venta_sin_iva": st.column_config.NumberColumn("Venta sin IVA", format="$ %0.2f"),
+            "pct_vnd": st.column_config.NumberColumn("% del vendedor", format="%0.2f"),
+            "clientes": st.column_config.NumberColumn("Clientes", format="%d"),
+            "renglones": st.column_config.NumberColumn("Renglones", format="%d"),
+        },
+    )
+
+# =========================
+# DASHBOARD (MAPA) - SIN CAMBIOS
 # =========================
 def dashboard_screen(mes: str):
     cfg = VENTAS_MESES[mes]
@@ -559,6 +767,7 @@ def dashboard_screen(mes: str):
     r2 = st.columns([2.2, 1.6, 1.6, 1.6, 1.5])
     r2[0].metric("$ Negado", f"${negado_valor:,.2f}")
     r2[1].metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
+    r2[2].metric("Negados sin precio", f"{faltan_precios:,}")
     with r2[4]:
         if st.button("📋 Ver detalle"):
             st.session_state.view = "negados"
@@ -644,10 +853,15 @@ try:
         login_screen()
     elif st.session_state.view == "menu":
         menu_screen()
+    elif st.session_state.view == "dashboard":
+        dashboard_screen(st.session_state.mes)
+    elif st.session_state.view == "especies":
+        especies_screen(st.session_state.mes)
     elif st.session_state.view == "negados":
         negados_detail_screen()
     else:
-        dashboard_screen(st.session_state.mes)
+        st.session_state.view = "menu"
+        st.rerun()
 
 except Exception:
     st.error("Tronó la app. Aquí está el error para corregirlo rápido:")
