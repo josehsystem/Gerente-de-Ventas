@@ -11,9 +11,8 @@ import traceback
 # =========================
 st.set_page_config(page_title="SERUR | Mapa de Ventas", layout="wide")
 
-# LOGO NUEVO (bonito)
 LOGO_URL = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"
-LOGO_FALLBACK = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"  # puedes cambiarlo por otro si quieres
+LOGO_FALLBACK = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"
 PASSWORD = "Serur2026*"   # <-- CAMBIA AQUÍ
 
 # CLIENTES (BASE)
@@ -146,10 +145,6 @@ def load_ventas(sheet_id: str, tab: str):
 
 @st.cache_data(ttl=300)
 def load_precios_serur():
-    """
-    PRECIOS:
-      tip_pre | cve_art | descri | precio | codigo_sat
-    """
     df = pd.read_csv(gviz_csv_url(SHEET_ID_PRECIOS, SHEET_TAB_PRECIOS))
     df.columns = df.columns.str.strip().str.lower()
 
@@ -181,18 +176,13 @@ def load_precios_serur():
 
 @st.cache_data(ttl=300)
 def load_negados_serur():
-    """
-    NEGADOS:
-      cve_vnd | folio | cve_art | (expression) | cve_alm
-    donde (expression) = cantidad negada (puede venir negativa en ajustes/devoluciones)
-    """
     df = pd.read_csv(gviz_csv_url(SHEET_ID_NEGADOS, SHEET_TAB_NEGADOS))
     df.columns = df.columns.str.strip().str.lower()
 
     if "cve_art" not in df.columns:
         return None, "No encontré cve_art en NEGADOS."
     if "(expression)" not in df.columns:
-        return None, "No encontré (expression) en NEGADOS (ahí debe venir la cantidad negada)."
+        return None, "No encontré (expression) en NEGADOS (ahí viene la cantidad negada)."
     if "cve_vnd" not in df.columns:
         return None, "No encontré cve_vnd (número de vendedor) en NEGADOS."
 
@@ -218,61 +208,96 @@ if "last_filters" not in st.session_state:
     st.session_state.last_filters = {}
 
 # =========================
-# LOGIN (BONITO)
+# LOGIN (BONITO Y CENTRADO)
 # =========================
 def login_screen():
     st.markdown("""
     <style>
-    .block-container{ padding-top: 7vh; }
+    /* Fondo suave */
+    .block-container{ padding-top: 0rem !important; }
+    [data-testid="stAppViewContainer"]{
+        background: #f3f5f7;
+    }
+
+    /* Centrado */
+    .login-wrap{
+        min-height: 92vh;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+    }
+
+    /* Tarjeta blanca */
     .login-card{
-        max-width: 520px;
-        margin: auto;
-        padding: 46px 42px 36px 42px;
-        border-radius: 16px;
-        background: rgba(255,255,255,0.06);
-        border: 1px solid rgba(255,255,255,0.12);
-        backdrop-filter: blur(6px);
-        box-shadow: 0 16px 40px rgba(0,0,0,0.20);
-        text-align: center;
+        width: 520px;
+        background: #ffffff;
+        border: 1px solid #e6e8ee;
+        border-radius: 18px;
+        box-shadow: 0 14px 35px rgba(15, 23, 42, 0.10);
+        padding: 34px 34px 26px 34px;
+        text-align:center;
     }
-    .title{
-        font-size: 22px;
+
+    .login-title{
+        font-size: 20px;
         font-weight: 700;
-        margin-top: 10px;
-        margin-bottom: 8px;
+        margin: 10px 0 18px 0;
+        color: #0f172a;
     }
-    .sub{
-        opacity: 0.80;
+
+    .login-label{
+        text-align:left;
         font-size: 13px;
-        margin-bottom: 18px;
-    }
-    div.stButton > button {
-        background-color: #0d3b82;
-        color: white;
         font-weight: 600;
-        border-radius: 8px;
-        height: 44px;
+        color: #111827;
+        margin: 10px 0 6px 2px;
     }
-    div.stButton > button:hover { background-color: #0b2f68; }
+
+    .login-card input{
+        height: 44px !important;
+        border-radius: 10px !important;
+        border: 1px solid #d7dbe7 !important;
+        padding: 0 12px !important;
+        font-size: 14px !important;
+    }
+
+    /* Botón azul */
+    .login-card div.stButton > button{
+        height: 44px;
+        border-radius: 10px;
+        background: #0d3b82;
+        color: white;
+        font-weight: 700;
+        border: none;
+        width: 100%;
+        margin-top: 14px;
+    }
+    .login-card div.stButton > button:hover{
+        background: #0b2f68;
+        border: none;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="login-card">', unsafe_allow_html=True)
-    safe_logo(width=240)
-    st.markdown('<div class="title">Acceso al Dashboard de Ventas</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub">Tradición • Confianza • Innovación</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-wrap"><div class="login-card">', unsafe_allow_html=True)
+    safe_logo(width=210)
+    st.markdown('<div class="login-title">Acceso al portal de clientes</div>', unsafe_allow_html=True)
 
+    st.markdown('<div class="login-label">Usuario</div>', unsafe_allow_html=True)
+    _user = st.text_input("Usuario", label_visibility="collapsed", placeholder="Usuario")
+
+    st.markdown('<div class="login-label">Contraseña</div>', unsafe_allow_html=True)
     pw = st.text_input("Contraseña", type="password", label_visibility="collapsed", placeholder="Contraseña")
 
-    if st.button("Ingresar", width="stretch"):
+    if st.button("Ingresar"):
         if pw == PASSWORD:
             st.session_state.auth_ok = True
             st.session_state.view = "menu"
             st.rerun()
         else:
-            st.error("Contraseña incorrecta")
+            st.error("Usuario o contraseña incorrectos")
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
 
 # =========================
 # MENU
@@ -333,8 +358,6 @@ def negados_detail_screen():
         dfn = dfn[dfn["cve_vnd"].isin(selected_cve_vnd)].copy()
 
     include_negative = filtros.get("include_negative", False)
-
-    # default: NO contar negativos
     if not include_negative:
         dfn = dfn[dfn["cant_negada"] > 0].copy()
 
@@ -519,7 +542,7 @@ def dashboard_screen(mes: str):
         "especie_sel": especie_sel,
     }
 
-    # KPIs (grid limpio)
+    # KPIs
     r1 = st.columns([2.2, 1.6, 1.6, 1.6, 1.5])
     with r1[0]:
         st.metric("Venta sin IVA", f"${venta_total:,.2f}")
@@ -662,7 +685,7 @@ def dashboard_screen(mes: str):
     )
 
 # =========================
-# ROUTER (protección anti pantalla negra)
+# ROUTER (anti pantalla negra)
 # =========================
 try:
     if not st.session_state.auth_ok:
