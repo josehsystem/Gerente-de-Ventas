@@ -13,7 +13,7 @@ st.set_page_config(page_title="SERUR | Mapa de Ventas", layout="wide")
 
 # LOGO NUEVO (bonito)
 LOGO_URL = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"
-LOGO_FALLBACK = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"  # puedes cambiarlo por otro si quieres
+LOGO_FALLBACK = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"
 PASSWORD = "Serur2026*"   # <-- CAMBIA AQUÍ
 
 # CLIENTES (BASE)
@@ -218,15 +218,14 @@ if "last_filters" not in st.session_state:
     st.session_state.last_filters = {}
 
 # =========================
-# LOGIN (BONITO)
+# LOGIN (CENTRADO Y BONITO)
 # =========================
 def login_screen():
     st.markdown("""
     <style>
-    .block-container{ padding-top: 7vh; }
-    .login-card{
-        max-width: 520px;
-        margin: auto;
+      .block-container { padding-top: 2rem; }
+
+      .login-card {
         padding: 46px 42px 36px 42px;
         border-radius: 16px;
         background: rgba(255,255,255,0.06);
@@ -234,45 +233,43 @@ def login_screen():
         backdrop-filter: blur(6px);
         box-shadow: 0 16px 40px rgba(0,0,0,0.20);
         text-align: center;
-    }
-    .title{
-        font-size: 22px;
-        font-weight: 700;
-        margin-top: 10px;
-        margin-bottom: 8px;
-    }
-    .sub{
-        opacity: 0.80;
-        font-size: 13px;
-        margin-bottom: 18px;
-    }
-    div.stButton > button {
+      }
+      .title{ font-size:22px; font-weight:700; margin-top:10px; margin-bottom:8px; }
+      .sub{ opacity:0.80; font-size:13px; margin-bottom:18px; }
+
+      div.stButton > button {
         background-color: #0d3b82;
         color: white;
         font-weight: 600;
         border-radius: 8px;
         height: 44px;
-    }
-    div.stButton > button:hover { background-color: #0b2f68; }
+        width: 100%;
+      }
+      div.stButton > button:hover { background-color: #0b2f68; }
+
+      [data-testid="stTextInput"] input { width: 100%; }
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="login-card">', unsafe_allow_html=True)
-    safe_logo(width=240)
-    st.markdown('<div class="title">Acceso al Dashboard de Ventas</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub">Tradición • Confianza • Innovación</div>', unsafe_allow_html=True)
+    left, mid, right = st.columns([1.2, 1.6, 1.2])
 
-    pw = st.text_input("Contraseña", type="password", label_visibility="collapsed", placeholder="Contraseña")
+    with mid:
+        st.markdown('<div class="login-card">', unsafe_allow_html=True)
+        safe_logo(width=240)
+        st.markdown('<div class="title">Acceso al Dashboard de Ventas</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub">Tradición • Confianza • Innovación</div>', unsafe_allow_html=True)
 
-    if st.button("Ingresar", width="stretch"):
-        if pw == PASSWORD:
-            st.session_state.auth_ok = True
-            st.session_state.view = "menu"
-            st.rerun()
-        else:
-            st.error("Contraseña incorrecta")
+        pw = st.text_input("Contraseña", type="password", label_visibility="collapsed", placeholder="Contraseña")
 
-    st.markdown('</div>', unsafe_allow_html=True)
+        if st.button("Ingresar"):
+            if pw == PASSWORD:
+                st.session_state.auth_ok = True
+                st.session_state.view = "menu"
+                st.rerun()
+            else:
+                st.error("Contraseña incorrecta")
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # =========================
 # MENU
