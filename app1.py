@@ -16,35 +16,33 @@ LOGO_URL = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"
 LOGO_FALLBACK = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"
 PASSWORD = "Serur2026*"
 
-# TEMA (color bonito)
-ACCENT = "#0d3b82"   # azul SERUR
+# TEMA (azul SERUR)
+ACCENT = "#0d3b82"
 ACCENT_HOVER = "#0b2f68"
 
-# CLIENTES (BASE)
-SHEET_ID_CLIENTES = "13MWoCG2_KIuhP7NPFYnudbRx99PNTwgynBbwkArewz0"
-SHEET_TAB_CLIENTES = "Hoja1"
-
-# VENTAS POR MES
-VENTAS_MESES = {
-    "ENERO": {"sheet_id": "1UpYQT6ErO3Xj3xdZ36IYJPRR9uDRQw-eYui9B_Y-JwU", "tab": "Hoja1"},
-    "FEBRERO": {"sheet_id": "1cPgQEFUx-6oId3-y3DAVwmwjaZozKu9L10D9uZnR7bE", "tab": "Hoja1"},
-}
-
-# NEGADOS + LISTA DE PRECIOS
-SHEET_ID_NEGADOS = "12kXQRhkKS1ea5H60YGIFcWEFJ_qcKSoXSl3p59Hk7ck"
-SHEET_TAB_NEGADOS = "Hoja1"
-SHEET_ID_PRECIOS = "1u-e_R3AH9Qs9eiiWwbB5gJEvNFSxmaBZmjrGFtqT_8o"
-SHEET_TAB_PRECIOS = "Hoja1"
-
-IVA_FACTOR = 1.16
-
 # =========================
-# CSS GLOBAL (bonito en TODO lo clickable)
+# CSS GLOBAL (bonito + azul en letras + azul en TODO lo clickable)
 # =========================
 st.markdown(f"""
 <style>
-/* Más aire */
+/* Aire */
 .block-container {{ padding-top: 1.2rem; padding-bottom: 2rem; }}
+
+/* TITULOS en azul */
+div[data-testid="stAppViewContainer"] h1,
+div[data-testid="stAppViewContainer"] h2,
+div[data-testid="stAppViewContainer"] h3,
+div[data-testid="stAppViewContainer"] h4,
+div[data-testid="stAppViewContainer"] h5,
+div[data-testid="stAppViewContainer"] h6 {{
+  color: {ACCENT} !important;
+  font-weight: 900 !important;
+}}
+
+/* Caption en azul suave */
+div[data-testid="stAppViewContainer"] .stCaption {{
+  color: rgba(13, 59, 130, 0.85) !important;
+}}
 
 /* BOTONES: aplica a TODO st.button */
 div.stButton > button {{
@@ -65,7 +63,7 @@ div.stButton > button:active {{
   transform: translateY(0px) !important;
 }}
 
-/* Inputs un poco más “pro” */
+/* Inputs más pro */
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input {{
   border-radius: 10px !important;
@@ -74,16 +72,13 @@ div.stButton > button:active {{
   border-radius: 10px !important;
 }}
 
-/* Tabs/controles: radio “pills” (lo hace ver más pro) */
-div[role="radiogroup"] {{
-  gap: .35rem !important;
-}}
+/* Radio “pills” */
+div[role="radiogroup"] {{ gap: .35rem !important; }}
 div[role="radiogroup"] label {{
   border: 1px solid rgba(255,255,255,0.10) !important;
   border-radius: 999px !important;
   padding: .25rem .55rem !important;
 }}
-/* El seleccionado (aprox) */
 div[role="radiogroup"] label:has(input:checked) {{
   background: rgba(13, 59, 130, 0.25) !important;
   border-color: rgba(13, 59, 130, 0.65) !important;
@@ -141,6 +136,25 @@ def safe_logo(width=220):
         st.image(LOGO_URL, width=width)
     except Exception:
         st.image(LOGO_FALLBACK, width=width)
+
+# =========================
+# DATA SOURCES
+# =========================
+SHEET_ID_CLIENTES = "13MWoCG2_KIuhP7NPFYnudbRx99PNTwgynBbwkArewz0"
+SHEET_TAB_CLIENTES = "Hoja1"
+
+VENTAS_MESES = {
+    "ENERO": {"sheet_id": "1UpYQT6ErO3Xj3xdZ36IYJPRR9uDRQw-eYui9B_Y-JwU", "tab": "Hoja1"},
+    "FEBRERO": {"sheet_id": "1cPgQEFUx-6oId3-y3DAVwmwjaZozKu9L10D9uZnR7bE", "tab": "Hoja1"},
+}
+
+SHEET_ID_NEGADOS = "12kXQRhkKS1ea5H60YGIFcWEFJ_qcKSoXSl3p59Hk7ck"
+SHEET_TAB_NEGADOS = "Hoja1"
+
+SHEET_ID_PRECIOS = "1u-e_R3AH9Qs9eiiWwbB5gJEvNFSxmaBZmjrGFtqT_8o"
+SHEET_TAB_PRECIOS = "Hoja1"
+
+IVA_FACTOR = 1.16
 
 # =========================
 # LOADERS
@@ -265,12 +279,11 @@ if "last_filters" not in st.session_state:
     st.session_state.last_filters = {}
 
 # =========================
-# LOGIN (CENTRADO EN SERIO + DIMENSIONAL BONITO)
+# LOGIN (CENTRADO)
 # =========================
 def login_screen():
     st.markdown(f"""
     <style>
-      /* Centramos verticalmente */
       .login-wrap {{
         min-height: calc(100vh - 160px);
         display: flex;
@@ -289,22 +302,22 @@ def login_screen():
       }}
       .title {{
         font-size: 22px;
-        font-weight: 800;
+        font-weight: 900;
         margin-top: 12px;
         margin-bottom: 8px;
+        color: {ACCENT};
       }}
       .sub {{
         opacity: 0.85;
         font-size: 13px;
         margin-bottom: 18px;
+        color: rgba(13,59,130,0.85);
       }}
-      /* separaciones */
       .sp-10 {{ height: 10px; }}
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="login-wrap"><div class="login-card">', unsafe_allow_html=True)
-
     safe_logo(width=240)
     st.markdown('<div class="title">Acceso al Dashboard de Ventas</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub">Tradición • Confianza • Innovación</div>', unsafe_allow_html=True)
@@ -320,7 +333,6 @@ def login_screen():
             st.rerun()
         else:
             st.error("Contraseña incorrecta")
-
     st.markdown('</div></div>', unsafe_allow_html=True)
 
 # =========================
