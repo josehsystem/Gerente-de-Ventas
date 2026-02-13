@@ -7,7 +7,7 @@ from urllib.parse import quote
 import traceback
 
 # =========================
-# CONFIG GENERAL (DEBE IR PRIMERO)
+# CONFIG GENERAL
 # =========================
 st.set_page_config(page_title="SERUR | Mapa de Ventas", layout="wide")
 
@@ -78,12 +78,6 @@ def normalize_int_series(s):
     x = pd.to_numeric(pd.Series(s), errors="coerce")
     return x.round(0).astype("Int64")
 
-def safe_image(url: str, width: int = 180):
-    try:
-        st.image(url, width=width)
-    except Exception:
-        st.write("")
-
 # =========================
 # LOADERS
 # =========================
@@ -95,7 +89,6 @@ def load_clientes():
     df = ensure_col(df, "cve_cte", "")
     df = ensure_col(df, "latitud", None)
     df = ensure_col(df, "longitud", None)
-
     df = ensure_col(df, "vendedor", "")
     df.rename(columns={"vendedor": "vendedor_cliente"}, inplace=True)
 
@@ -159,28 +152,32 @@ def load_precios_serur():
     df["cve_art"] = df["cve_art"].astype(str).str.strip()
     df["precio"] = pd.to_numeric(df["precio"], errors="coerce").fillna(0)
 
-    # tip_pre=1
+    if "descri" not in df.columns:
+        df["descri"] = ""
+
     if "tip_pre" in df.columns:
         df["tip_pre"] = pd.to_numeric(df["tip_pre"], errors="coerce").fillna(0).astype(int)
         if (df["tip_pre"] == 1).any():
             df = df[df["tip_pre"] == 1].copy()
 
-    # traer descri si existe
-    if "descri" not in df.columns:
-        df["descri"] = ""
+    # si hay repetidos, nos quedamos con el precio máximo y una descri cualquiera no vacía
+    def pick_descri(s):
+        s = s.astype(str).fillna("").str.strip()
+        s = s[s != ""]
+        return s.iloc[0] if len(s) else ""
 
-    # max precio por cve_art (y una descri cualquiera)
-    df = df.sort_values(["cve_art", "precio"], ascending=[True, False])
-    df = df.drop_duplicates(subset=["cve_art"], keep="first")[["cve_art", "precio", "descri"]].copy()
-
-    return df, None
+    agg = df.groupby("cve_art", as_index=False).agg(
+        precio=("precio", "max"),
+        descri=("descri", pick_descri),
+    )
+    return agg, None
 
 @st.cache_data(ttl=300)
 def load_negados_serur():
     """
     NEGADOS:
       cve_vnd | folio | cve_art | (expression) | cve_alm
-    donde (expression) = cantidad negada
+    donde (expression) = cantidad negada (puede venir negativa en ajustes/devoluciones)
     """
     df = pd.read_csv(gviz_csv_url(SHEET_ID_NEGADOS, SHEET_TAB_NEGADOS))
     df.columns = df.columns.str.strip().str.lower()
@@ -196,61 +193,11 @@ def load_negados_serur():
     df["cant_negada"] = pd.to_numeric(df["(expression)"], errors="coerce").fillna(0)
     df["cve_vnd"] = normalize_int_series(df["cve_vnd"])
 
-    return df[["cve_vnd", "cve_art", "cant_negada"]].copy(), None
+    # dejamos folio/cve_alm si existen (por si luego quieres drilldown)
+    df = ensure_col(df, "folio", "")
+    df = ensure_col(df, "cve_alm", "")
 
-def compute_negados_detail(ventas: pd.DataFrame, modo: str, vend_sel_str: list[str]):
-    """
-    Regresa:
-      negado_total_valor, faltan_precios, detalle_df
-    detalle_df columnas: cve_art, codigo, descri, cant_negada, precio, valor, pct
-    """
-    negados_df, err_neg = load_negados_serur()
-    precios_df, err_pre = load_precios_serur()
-
-    if err_neg or err_pre or negados_df is None or precios_df is None:
-        return 0.0, 0, pd.DataFrame(), err_neg, err_pre
-
-    # cve_vnd seleccionados
-    if modo == "Todos":
-        selected_cve_vnd = None  # global
-    else:
-        if "cve_vnd" in ventas.columns and ventas["cve_vnd"].notna().any():
-            map_df = ventas[["vendedor", "cve_vnd"]].dropna().copy()
-            map_df["vendedor"] = map_df["vendedor"].astype(str).str.strip()
-            map_df["cve_vnd"] = normalize_int_series(map_df["cve_vnd"])
-            selected_cve_vnd = sorted(
-                map_df[map_df["vendedor"].isin(vend_sel_str)]["cve_vnd"].dropna().unique().tolist()
-            )
-        else:
-            selected_cve_vnd = sorted(normalize_int_series(vend_sel_str).dropna().unique().tolist())
-
-    dfn = negados_df.copy()
-    if selected_cve_vnd is not None:
-        dfn = dfn[dfn["cve_vnd"].isin(selected_cve_vnd)].copy()
-
-    # sum por articulo
-    dfn = dfn.groupby("cve_art", as_index=False)["cant_negada"].sum()
-
-    # merge precios + descri
-    dfn = dfn.merge(precios_df, on="cve_art", how="left")
-    dfn["precio"] = pd.to_numeric(dfn["precio"], errors="coerce").fillna(0)
-    if "descri" not in dfn.columns:
-        dfn["descri"] = ""
-
-    dfn["valor"] = dfn["cant_negada"] * dfn["precio"]
-
-    negado_total = float(dfn["valor"].sum()) if not dfn.empty else 0.0
-    dfn["pct"] = (dfn["valor"] / negado_total * 100) if negado_total > 0 else 0.0
-
-    faltan_precios = int(((dfn["cant_negada"] > 0) & (dfn["precio"] <= 0)).sum())
-
-    # columnas pedidas:
-    # clave=cve_art, codigo (lo mismo), descripcion=descri, valor, %
-    dfn = dfn.sort_values("valor", ascending=False).reset_index(drop=True)
-    dfn["codigo"] = dfn["cve_art"]  # por si quieres separar después
-
-    detalle = dfn[["cve_art", "codigo", "descri", "cant_negada", "precio", "valor", "pct"]].copy()
-    return negado_total, faltan_precios, detalle, None, None
+    return df[["cve_vnd", "cve_art", "cant_negada", "folio", "cve_alm"]].copy(), None
 
 # =========================
 # ESTADO
@@ -262,31 +209,9 @@ if "view" not in st.session_state:
 if "mes" not in st.session_state:
     st.session_state.mes = "ENERO"
 
-# filtros persistentes
-for k, v in {
-    "modo": "Todos",
-    "vendedor_sel": [],
-    "especie_sel": [],
-    "heat": False,
-    "show_no_sales": False,
-    "max_no_sales": 1500,
-    "solo_top": 0,
-    "gray_fake_sale": 5000,
-}.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
-
-# datos de detalle negados (cache en sesión)
-if "negados_detalle" not in st.session_state:
-    st.session_state.negados_detalle = pd.DataFrame()
-if "negados_total_valor" not in st.session_state:
-    st.session_state.negados_total_valor = 0.0
-if "negados_err_neg" not in st.session_state:
-    st.session_state.negados_err_neg = None
-if "negados_err_pre" not in st.session_state:
-    st.session_state.negados_err_pre = None
-if "negados_faltan_precios" not in st.session_state:
-    st.session_state.negados_faltan_precios = 0
+# guardamos filtros para que la vista de detalle respete lo mismo
+if "last_filters" not in st.session_state:
+    st.session_state.last_filters = {}
 
 # =========================
 # LOGIN
@@ -308,13 +233,13 @@ def login_screen():
         unsafe_allow_html=True
     )
     st.markdown('<div class="login-box">', unsafe_allow_html=True)
-    safe_image(LOGO_URL, width=180)
+    st.image(LOGO_URL)
     st.markdown('<div class="login-title">Dashboard de Ventas</div>', unsafe_allow_html=True)
     st.markdown('<div class="login-sub">Acceso con contraseña</div>', unsafe_allow_html=True)
 
     pw = st.text_input("Contraseña", type="password", label_visibility="collapsed", placeholder="Contraseña")
 
-    if st.button("Entrar", width="stretch"):
+    if st.button("Entrar", use_container_width=True):
         if pw == PASSWORD:
             st.session_state.auth_ok = True
             st.session_state.view = "menu"
@@ -328,87 +253,104 @@ def login_screen():
 # MENU
 # =========================
 def menu_screen():
-    safe_image(LOGO_URL, width=200)
+    st.image(LOGO_URL, width=200)
     st.title("Menú principal")
     st.caption("Elige el mes para ver el mapa y KPIs.")
 
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
-        if st.button("📌 ENERO", width="stretch"):
+        if st.button("📌 ENERO", use_container_width=True):
             st.session_state.mes = "ENERO"
             st.session_state.view = "dashboard"
             st.rerun()
     with col2:
-        if st.button("📌 FEBRERO", width="stretch"):
+        if st.button("📌 FEBRERO", use_container_width=True):
             st.session_state.mes = "FEBRERO"
             st.session_state.view = "dashboard"
             st.rerun()
     with col3:
-        if st.button("🚪 Cerrar sesión", width="stretch"):
+        if st.button("🚪 Cerrar sesión", use_container_width=True):
             st.session_state.auth_ok = False
             st.session_state.view = "login"
             st.rerun()
 
 # =========================
-# VISTA DETALLE NEGADOS
+# DETALLE NEGADOS
 # =========================
-def negados_screen():
-    safe_image(LOGO_URL, width=170)
-    top1, top2 = st.columns([1, 3])
-    with top1:
-        if st.button("⬅ Regresar al dashboard", width="stretch"):
+def negados_detail_screen():
+    st.image(LOGO_URL, width=170)
+
+    top = st.columns([1, 4, 1])
+    with top[0]:
+        if st.button("⬅ Volver", use_container_width=True):
             st.session_state.view = "dashboard"
             st.rerun()
-    with top2:
-        st.title(f"Detalle de Negados | {st.session_state.mes}")
+    with top[1]:
+        st.title("Detalle de Negados")
+        st.caption("Ordenado de mayor a menor valor. Respeta los filtros actuales (vendedor/especie).")
 
-    total = float(st.session_state.get("negados_total_valor", 0.0))
-    faltan = int(st.session_state.get("negados_faltan_precios", 0))
-    errn = st.session_state.get("negados_err_neg")
-    errp = st.session_state.get("negados_err_pre")
+    filtros = st.session_state.last_filters or {}
 
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        st.metric("Total Negado", f"${total:,.2f}")
-    with c2:
-        if faltan > 0:
-            st.caption(f"⚠️ {faltan:,} renglones negados quedaron sin precio (precio=0).")
+    negados_df, err_neg = load_negados_serur()
+    precios_df, err_pre = load_precios_serur()
 
-    if errn:
-        st.error(f"NEGADOS: {errn}")
-    if errp:
-        st.error(f"PRECIOS: {errp}")
-
-    df = st.session_state.get("negados_detalle", pd.DataFrame()).copy()
-    if df is None or df.empty:
-        st.warning("No hay detalle para mostrar con los filtros actuales.")
+    if err_neg:
+        st.error(f"NEGADOS: {err_neg}")
+        return
+    if err_pre:
+        st.error(f"PRECIOS: {err_pre}")
         return
 
+    dfn = negados_df.copy()
+
+    # aplicar filtro por vendedor (cve_vnd) si venía seleccionado
+    selected_cve_vnd = filtros.get("selected_cve_vnd", None)
+    if selected_cve_vnd is not None:
+        dfn = dfn[dfn["cve_vnd"].isin(selected_cve_vnd)].copy()
+
+    include_negative = filtros.get("include_negative", False)
+
+    # default: NO contar negativos (ajustes / devoluciones)
+    if not include_negative:
+        dfn = dfn[dfn["cant_negada"] > 0].copy()
+
+    dfn = dfn.merge(precios_df, on="cve_art", how="left")
+    dfn["precio"] = pd.to_numeric(dfn["precio"], errors="coerce").fillna(0)
+    dfn["descri"] = dfn.get("descri", "").astype(str).fillna("").str.strip()
+    dfn["valor"] = dfn["cant_negada"] * dfn["precio"]
+
+    # agrupación por artículo
+    det = dfn.groupby(["cve_art", "descri"], as_index=False).agg(
+        cant_negada=("cant_negada", "sum"),
+        precio=("precio", "max"),
+        valor=("valor", "sum"),
+    )
+
+    total = float(det["valor"].sum()) if not det.empty else 0.0
+    det["pct_total"] = (det["valor"] / total * 100) if total > 0 else 0.0
+
+    det = det.sort_values("valor", ascending=False)
+
+    st.subheader("Resumen")
+    c1, c2, c3 = st.columns([1.5, 1.2, 1.2])
+    c1.metric("Total negado (valor)", f"${total:,.2f}")
+    c2.metric("Renglones (artículos)", f"{len(det):,}")
+    faltan = int((det["precio"] <= 0).sum()) if not det.empty else 0
+    c3.metric("Sin precio (precio=0)", f"{faltan:,}")
+
     st.divider()
-
-    bus = st.text_input("Buscar (clave/código/descri)", value="", placeholder="Ej: 715 o CERRADURA")
-    dff = df.copy()
-    if bus.strip():
-        b = bus.strip().lower()
-        dff = dff[
-            dff["cve_art"].astype(str).str.lower().str.contains(b, na=False) |
-            dff["codigo"].astype(str).str.lower().str.contains(b, na=False) |
-            dff["descri"].astype(str).str.lower().str.contains(b, na=False)
-        ].copy()
-
-    # salida pedida: clave, codigo, descripcion, valor, % del total (y ordenado)
-    out = dff.sort_values("valor", ascending=False).copy()
-    out = out.rename(columns={"cve_art": "clave", "descri": "descripcion", "pct": "%_del_total"})
-    out["%_del_total"] = out["%_del_total"].fillna(0)
+    st.subheader("Detalle")
 
     st.dataframe(
-        out[["clave", "codigo", "descripcion", "valor", "%_del_total"]].head(5000),
-        width="stretch",
+        det,
+        use_container_width=True,
         hide_index=True,
         column_config={
+            "cant_negada": st.column_config.NumberColumn("cant_negada", format="%0.2f"),
+            "precio": st.column_config.NumberColumn("precio", format="$ %0.2f"),
             "valor": st.column_config.NumberColumn("valor", format="$ %0.2f"),
-            "%_del_total": st.column_config.NumberColumn("% del total", format="%0.2f"),
-        },
+            "pct_total": st.column_config.NumberColumn("% del total", format="%0.2f"),
+        }
     )
 
 # =========================
@@ -416,15 +358,17 @@ def negados_screen():
 # =========================
 def dashboard_screen(mes: str):
     cfg = VENTAS_MESES[mes]
+    ventas = load_ventas(cfg["sheet_id"], cfg["tab"])
+    clientes = load_clientes()
 
-    with st.spinner("Cargando datos..."):
-        ventas = load_ventas(cfg["sheet_id"], cfg["tab"])
-        clientes = load_clientes()
+    negados_df, err_neg = load_negados_serur()
+    precios_df, err_pre = load_precios_serur()
 
-    safe_image(LOGO_URL, width=170)
+    st.image(LOGO_URL, width=170)
+
     topbar1, topbar2 = st.columns([1, 3])
     with topbar1:
-        if st.button("⬅ Regresar al menú", width="stretch"):
+        if st.button("⬅ Regresar al menú", use_container_width=True):
             st.session_state.view = "menu"
             st.rerun()
     with topbar2:
@@ -437,47 +381,50 @@ def dashboard_screen(mes: str):
 
     especies = sorted([e for e in ventas["especie"].dropna().unique().tolist() if clean_text(e) != ""])
 
-    c1, c2, c3, c4, c5 = st.columns([2.4, 2.8, 1.6, 2.6, 2.0])
+    c1, c2, c3, c4, c5 = st.columns([2.2, 2.6, 1.3, 2.8, 2.1])
     with c1:
-        st.session_state.modo = st.radio("Vendedores", ["Todos", "Elegir"], horizontal=True, index=0 if st.session_state.modo=="Todos" else 1)
+        modo = st.radio("Vendedores", ["Todos", "Elegir"], horizontal=True)
     with c2:
-        st.session_state.especie_sel = st.multiselect("Especie(s) (opcional)", options=especies, default=st.session_state.especie_sel)
+        especie_sel = st.multiselect("Especie(s) (opcional)", options=especies, default=[])
     with c3:
-        st.session_state.heat = st.checkbox("Heatmap", value=st.session_state.heat)
+        heat = st.checkbox("Heatmap", value=False)
     with c4:
-        st.session_state.show_no_sales = st.checkbox("Mostrar clientes sin compra (del vendedor)", value=st.session_state.show_no_sales)
+        show_no_sales = st.checkbox("Mostrar clientes sin compra (del vendedor)", value=False)
     with c5:
-        st.session_state.max_no_sales = st.slider("Máx sin compra", 0, 10000, int(st.session_state.max_no_sales), 250, disabled=not st.session_state.show_no_sales)
+        max_no_sales = st.slider("Máx sin compra", 0, 10000, 1500, 250, disabled=not show_no_sales)
 
-    if st.session_state.modo == "Todos":
-        st.session_state.vendedor_sel = vendedores
-    else:
-        # asegura defaults válidos
-        default_v = st.session_state.vendedor_sel if st.session_state.vendedor_sel else vendedores
-        st.session_state.vendedor_sel = st.multiselect("Vendedor(es)", options=vendedores, default=default_v)
+    vendedor_sel = vendedores if modo == "Todos" else st.multiselect("Vendedor(es)", options=vendedores, default=vendedores)
 
-    st.session_state.solo_top = st.number_input("Top clientes con venta (0=todos)", min_value=0, value=int(st.session_state.solo_top), step=50)
+    solo_top = st.number_input("Top clientes con venta (0=todos)", min_value=0, value=0, step=50)
 
-    st.session_state.gray_fake_sale = st.number_input(
+    GRAY_FAKE_SALE = st.number_input(
         "Tamaño de gris (monto ficticio)",
-        min_value=1000, value=int(st.session_state.gray_fake_sale), step=500,
-        disabled=not st.session_state.show_no_sales
+        min_value=1000, value=5000, step=500,
+        disabled=not show_no_sales
     )
 
-    vend_sel_str = [str(x).strip() for x in st.session_state.vendedor_sel]
-    dfv = ventas[ventas["vendedor"].isin(vend_sel_str)].copy()
-    if st.session_state.especie_sel:
-        dfv = dfv[dfv["especie"].isin([str(x) for x in st.session_state.especie_sel])]
+    include_negative = st.checkbox("Incluir negados en negativo (ajustes/devoluciones)", value=False)
 
-    # SKUs únicos (solo 1 vendedor seleccionado)
+    # -------------------------
+    # Ventas filtradas
+    # -------------------------
+    vend_sel_str = [str(x).strip() for x in vendedor_sel]
+    dfv = ventas[ventas["vendedor"].isin(vend_sel_str)].copy()
+    if especie_sel:
+        dfv = dfv[dfv["especie"].isin([str(x) for x in especie_sel])]
+
+    # -------------------------
+    # SKUs únicos (GLOBAL según filtros)
+    # -------------------------
     sku_unicos = None
-    mostrar_skus = (st.session_state.modo == "Elegir" and isinstance(st.session_state.vendedor_sel, list) and len(st.session_state.vendedor_sel) == 1)
-    if mostrar_skus and not dfv.empty:
+    if not dfv.empty:
         sku_col = pick_sku_col(dfv)
         if sku_col:
             sku_unicos = int(dfv[sku_col].astype(str).str.strip().replace("", pd.NA).dropna().nunique())
 
+    # -------------------------
     # Agregación para mapa
+    # -------------------------
     if not dfv.empty:
         grp = dfv.groupby(["cve_cte", "vendedor"], as_index=False).agg(
             venta_sin_iva=("venta_sin_iva", "sum"),
@@ -495,63 +442,97 @@ def dashboard_screen(mes: str):
         elif "vendedor_y" in df_sales.columns:
             df_sales.rename(columns={"vendedor_y": "vendedor"}, inplace=True)
 
-    if st.session_state.solo_top and st.session_state.solo_top > 0 and not df_sales.empty:
-        df_sales = df_sales.sort_values("venta_sin_iva", ascending=False).head(int(st.session_state.solo_top))
+    if solo_top and solo_top > 0 and not df_sales.empty:
+        df_sales = df_sales.sort_values("venta_sin_iva", ascending=False).head(int(solo_top))
 
     ventas_ctes = set(df_sales["cve_cte"].astype(str).tolist()) if not df_sales.empty else set()
 
     # Clientes scope (sin compra)
-    clientes_scope = clientes.copy() if st.session_state.modo == "Todos" else clientes[clientes["vendedor_cliente"].isin(vend_sel_str)].copy()
+    clientes_scope = clientes.copy() if modo == "Todos" else clientes[clientes["vendedor_cliente"].isin(vend_sel_str)].copy()
 
     df_no_sales_all = clientes_scope[~clientes_scope["cve_cte"].astype(str).isin(ventas_ctes)].copy()
     df_no_sales = df_no_sales_all
-    if st.session_state.show_no_sales and st.session_state.max_no_sales > 0 and len(df_no_sales) > st.session_state.max_no_sales:
-        df_no_sales = df_no_sales.head(int(st.session_state.max_no_sales))
+    if show_no_sales and max_no_sales > 0 and len(df_no_sales) > max_no_sales:
+        df_no_sales = df_no_sales.head(int(max_no_sales))
 
+    # =========================
     # KPIs ventas
+    # =========================
     venta_total = float(df_sales["venta_sin_iva"].sum()) if not df_sales.empty else 0.0
     clientes_con_venta = int(df_sales["cve_cte"].nunique()) if not df_sales.empty else 0
     ticket_prom = (venta_total / clientes_con_venta) if clientes_con_venta else 0.0
     clientes_asignados = int(clientes_scope["cve_cte"].nunique())
     cobertura = (clientes_con_venta / clientes_asignados * 100) if clientes_asignados else 0.0
 
-    # NEGADOS + detalle
-    negado_valor, faltan_precios, detalle, err_neg, err_pre = compute_negados_detail(
-        ventas=ventas,
-        modo=st.session_state.modo,
-        vend_sel_str=vend_sel_str
-    )
+    # =========================
+    # NEGADOS (filtra por cve_vnd si aplica)
+    # =========================
+    negado_valor = 0.0
+    faltan_precios = 0
+    selected_cve_vnd = None
+
+    if modo == "Todos":
+        selected_cve_vnd = None  # global real
+    else:
+        if "cve_vnd" in ventas.columns and ventas["cve_vnd"].notna().any():
+            map_df = ventas[["vendedor", "cve_vnd"]].dropna().copy()
+            map_df["vendedor"] = map_df["vendedor"].astype(str).str.strip()
+            map_df["cve_vnd"] = normalize_int_series(map_df["cve_vnd"])
+            selected_cve_vnd = sorted(map_df[map_df["vendedor"].isin(vend_sel_str)]["cve_vnd"].dropna().unique().tolist())
+        else:
+            selected_cve_vnd = sorted(normalize_int_series(vend_sel_str).dropna().unique().tolist())
+
+    if err_neg is None and err_pre is None and negados_df is not None and precios_df is not None:
+        dfn = negados_df.copy()
+
+        if selected_cve_vnd is not None:
+            dfn = dfn[dfn["cve_vnd"].isin(selected_cve_vnd)].copy()
+
+        # default: NO sumar negativos
+        if not include_negative:
+            dfn = dfn[dfn["cant_negada"] > 0].copy()
+
+        dfn = dfn.merge(precios_df, on="cve_art", how="left")
+        dfn["precio"] = pd.to_numeric(dfn["precio"], errors="coerce").fillna(0)
+
+        negado_valor = float((dfn["cant_negada"] * dfn["precio"]).sum())
+        faltan_precios = int(((dfn["cant_negada"] > 0) & (dfn["precio"] <= 0)).sum())
+
     pct_negado_vs_vendido = (negado_valor / venta_total * 100) if venta_total > 0 else 0.0
 
-    # guarda detalle en sesión para vista aparte
-    st.session_state.negados_detalle = detalle
-    st.session_state.negados_total_valor = float(negado_valor)
-    st.session_state.negados_faltan_precios = int(faltan_precios)
-    st.session_state.negados_err_neg = err_neg
-    st.session_state.negados_err_pre = err_pre
+    # guardamos filtros para la vista detalle
+    st.session_state.last_filters = {
+        "selected_cve_vnd": selected_cve_vnd,
+        "include_negative": include_negative,
+        "mes": mes,
+        "modo": modo,
+        "vendedor_sel": vend_sel_str,
+        "especie_sel": especie_sel,
+    }
 
-    # KPIs (negados con botón "Ver detalle")
-    if mostrar_skus:
-        k1, k2, k3, k4, k5 = st.columns(5)
-        k1.metric("Venta sin IVA", f"${venta_total:,.2f}")
-        k2.metric("Clientes con venta", f"{clientes_con_venta:,}")
-        k3.metric("Ticket prom.", f"${ticket_prom:,.2f}")
-        k4.metric("Cobertura", f"{cobertura:,.1f}%")
-        k5.metric("SKUs únicos (vendidos)", "N/D" if sku_unicos is None else f"{sku_unicos:,}")
-    else:
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Venta sin IVA", f"${venta_total:,.2f}")
-        k2.metric("Clientes con venta", f"{clientes_con_venta:,}")
-        k3.metric("Ticket prom.", f"${ticket_prom:,.2f}")
-        k4.metric("Cobertura", f"{cobertura:,.1f}%")
+    # =========================
+    # KPIs (MAQUETADO + BOTÓN)
+    # =========================
+    r1 = st.columns([2.2, 1.6, 1.6, 1.6, 1.5])
+    with r1[0]:
+        st.metric("Venta sin IVA", f"${venta_total:,.2f}")
+    with r1[1]:
+        st.metric("Clientes con venta", f"{clientes_con_venta:,}")
+    with r1[2]:
+        st.metric("Ticket prom.", f"${ticket_prom:,.2f}")
+    with r1[3]:
+        st.metric("Cobertura", f"{cobertura:,.1f}%")
+    with r1[4]:
+        st.metric("SKUs únicos (vendidos)", "N/D" if sku_unicos is None else f"{sku_unicos:,}")
 
-    n1, n2, n3 = st.columns([1.2, 1.2, 1.0])
-    with n1:
+    r2 = st.columns([2.2, 1.6, 1.6, 1.6, 1.5])
+    with r2[0]:
         st.metric("$ Negado", f"${negado_valor:,.2f}")
-    with n2:
+    with r2[1]:
         st.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
-    with n3:
-        if st.button("📋 Ver detalle", width="stretch"):
+    with r2[4]:
+        st.write("")  # espacio
+        if st.button("📋 Ver detalle", use_container_width=True):
             st.session_state.view = "negados"
             st.rerun()
 
@@ -564,7 +545,9 @@ def dashboard_screen(mes: str):
 
     st.divider()
 
+    # =========================
     # MAPA
+    # =========================
     base_for_center = df_sales if not df_sales.empty else clientes_scope if not clientes_scope.empty else clientes
     center = [base_for_center["latitud"].mean(), base_for_center["longitud"].mean()]
     m = folium.Map(location=center, zoom_start=11, tiles="OpenStreetMap")
@@ -602,8 +585,8 @@ def dashboard_screen(mes: str):
 
     layer_sales.add_to(m)
 
-    if st.session_state.show_no_sales and not df_no_sales.empty:
-        gray_radius = radius_from_sale(st.session_state.gray_fake_sale, min_r=7, max_r=16)
+    if show_no_sales and not df_no_sales.empty:
+        gray_radius = radius_from_sale(GRAY_FAKE_SALE, min_r=7, max_r=16)
         for _, r in df_no_sales.iterrows():
             lat = float(r["latitud"]); lon = float(r["longitud"])
             cve = clean_text(r.get("cve_cte",""))
@@ -623,7 +606,7 @@ def dashboard_screen(mes: str):
 
         layer_gray.add_to(m)
 
-    if st.session_state.heat and not df_sales.empty:
+    if heat and not df_sales.empty:
         heat_data = df_sales[["latitud","longitud","venta_sin_iva"]].dropna()
         HeatMap(heat_data.values.tolist(), radius=18, blur=15, max_zoom=13).add_to(layer_heat)
         layer_heat.add_to(m)
@@ -631,9 +614,11 @@ def dashboard_screen(mes: str):
     folium.LayerControl(collapsed=True).add_to(m)
 
     st.subheader("Mapa")
-    st_folium(m, width="stretch", height=650)
+    st_folium(m, use_container_width=True, height=650)
 
+    # =========================
     # TABLAS
+    # =========================
     st.divider()
 
     st.subheader("Top clientes con venta (según filtros)")
@@ -644,7 +629,7 @@ def dashboard_screen(mes: str):
     )
     st.dataframe(
         top_clientes[["cve_cte", "nombre", "venta_sin_iva"]].head(200),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         column_config={
             "venta_sin_iva": st.column_config.NumberColumn("venta_sin_iva", format="$ %0.2f"),
@@ -666,7 +651,7 @@ def dashboard_screen(mes: str):
 
     st.dataframe(
         df_nc[["cve_cte", "nombre", "vendedor_cliente", "latitud", "longitud"]].head(5000),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         column_config={
             "latitud": st.column_config.NumberColumn("latitud", format="%0.6f"),
@@ -675,9 +660,9 @@ def dashboard_screen(mes: str):
     )
 
 # =========================
-# ROUTER + PROTECCIÓN (evita pantalla negra)
+# ROUTER (con protección anti “pantalla negra”)
 # =========================
-def main():
+try:
     if not st.session_state.auth_ok:
         st.session_state.view = "login"
 
@@ -686,12 +671,10 @@ def main():
     elif st.session_state.view == "menu":
         menu_screen()
     elif st.session_state.view == "negados":
-        negados_screen()
+        negados_detail_screen()
     else:
         dashboard_screen(st.session_state.mes)
 
-try:
-    main()
 except Exception as e:
-    st.error("Se cayó la app. Aquí está el error real:")
+    st.error("Tronó la app. Aquí está el error para corregirlo rápido:")
     st.code(traceback.format_exc())
