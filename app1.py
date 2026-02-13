@@ -208,16 +208,15 @@ if "last_filters" not in st.session_state:
     st.session_state.last_filters = {}
 
 # =========================
-# LOGIN (ENCAPSULADO EN TABLITA)
+# LOGIN (BONITO Y CENTRADO)
 # =========================
 def login_screen():
     st.markdown("""
     <style>
+    /* Fondo suave */
     .block-container{ padding-top: 0rem !important; }
-
-    /* Fondo oscuro elegante */
     [data-testid="stAppViewContainer"]{
-        background: radial-gradient(1200px 600px at 30% 10%, rgba(13,59,130,0.28), rgba(0,0,0,0.92));
+        background: #f3f5f7;
     }
 
     /* Centrado */
@@ -226,124 +225,68 @@ def login_screen():
         display:flex;
         align-items:center;
         justify-content:center;
-        padding: 16px;
     }
 
-    /* Card */
+    /* Tarjeta blanca */
     .login-card{
-        width: min(760px, 96vw);
-        background: rgba(255,255,255,0.07);
-        border: 1px solid rgba(255,255,255,0.16);
+        width: 520px;
+        background: #ffffff;
+        border: 1px solid #e6e8ee;
         border-radius: 18px;
-        box-shadow: 0 18px 55px rgba(0,0,0,0.45);
-        padding: 18px;
-        backdrop-filter: blur(10px);
+        box-shadow: 0 14px 35px rgba(15, 23, 42, 0.10);
+        padding: 34px 34px 26px 34px;
+        text-align:center;
     }
 
-    /* Grid tipo "tablita" */
-    .grid{
-        display:grid;
-        grid-template-columns: 240px 1fr;
-        gap: 16px;
-        align-items:stretch;
-    }
-
-    .left{
-        border-radius: 14px;
-        background: rgba(13,59,130,0.35);
-        border: 1px solid rgba(255,255,255,0.12);
-        padding: 18px 16px;
-        display:flex;
-        flex-direction:column;
-        justify-content:center;
-        align-items:flex-start;
-    }
-    .brand{
-        font-size: 18px;
-        font-weight: 800;
-        color: #ffffff;
-        margin-top: 10px;
-        line-height: 1.1;
-    }
-    .tagline{
-        margin-top: 6px;
-        font-size: 12px;
-        color: rgba(255,255,255,0.80);
-    }
-
-    .right{
-        border-radius: 14px;
-        background: rgba(255,255,255,0.06);
-        border: 1px solid rgba(255,255,255,0.12);
-        padding: 18px 18px 16px 18px;
-    }
-
-    .title{
+    .login-title{
         font-size: 20px;
-        font-weight: 800;
-        color: #ffffff;
-        margin: 2px 0 14px 0;
+        font-weight: 700;
+        margin: 10px 0 18px 0;
+        color: #0f172a;
     }
 
-    .label{
+    .login-label{
+        text-align:left;
         font-size: 13px;
-        font-weight: 700;
-        color: rgba(255,255,255,0.92);
+        font-weight: 600;
+        color: #111827;
         margin: 10px 0 6px 2px;
     }
 
-    /* Inputs */
-    .right input{
+    .login-card input{
         height: 44px !important;
         border-radius: 10px !important;
-        border: 1px solid rgba(255,255,255,0.20) !important;
-        background: rgba(0,0,0,0.25) !important;
-        color: #ffffff !important;
+        border: 1px solid #d7dbe7 !important;
         padding: 0 12px !important;
         font-size: 14px !important;
     }
 
-    /* Botón */
-    .right div.stButton > button{
+    /* Botón azul */
+    .login-card div.stButton > button{
         height: 44px;
         border-radius: 10px;
         background: #0d3b82;
         color: white;
-        font-weight: 800;
+        font-weight: 700;
         border: none;
         width: 100%;
-        margin-top: 12px;
+        margin-top: 14px;
     }
-    .right div.stButton > button:hover{
+    .login-card div.stButton > button:hover{
         background: #0b2f68;
         border: none;
-    }
-
-    /* Ajuste responsive */
-    @media (max-width: 720px){
-        .grid{ grid-template-columns: 1fr; }
-        .left{ align-items:center; text-align:center; }
     }
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="login-wrap"><div class="login-card"><div class="grid">', unsafe_allow_html=True)
+    st.markdown('<div class="login-wrap"><div class="login-card">', unsafe_allow_html=True)
+    safe_logo(width=210)
+    st.markdown('<div class="login-title">Acceso al portal de clientes</div>', unsafe_allow_html=True)
 
-    # Izquierda (logo + texto)
-    st.markdown('<div class="left">', unsafe_allow_html=True)
-    safe_logo(width=170)
-    st.markdown('<div class="brand">SERUR</div>', unsafe_allow_html=True)
-    st.markdown('<div class="tagline">Tradición • Confianza • Innovación</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Derecha (form)
-    st.markdown('<div class="right">', unsafe_allow_html=True)
-    st.markdown('<div class="title">Acceso al Dashboard de Ventas</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="label">Usuario</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-label">Usuario</div>', unsafe_allow_html=True)
     _user = st.text_input("Usuario", label_visibility="collapsed", placeholder="Usuario")
 
-    st.markdown('<div class="label">Contraseña</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-label">Contraseña</div>', unsafe_allow_html=True)
     pw = st.text_input("Contraseña", type="password", label_visibility="collapsed", placeholder="Contraseña")
 
     if st.button("Ingresar"):
@@ -354,8 +297,7 @@ def login_screen():
         else:
             st.error("Usuario o contraseña incorrectos")
 
-    st.markdown('</div>', unsafe_allow_html=True)  # right
-    st.markdown('</div></div></div>', unsafe_allow_html=True)  # grid, card, wrap
+    st.markdown('</div></div>', unsafe_allow_html=True)
 
 # =========================
 # MENU
