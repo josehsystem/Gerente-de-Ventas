@@ -11,10 +11,14 @@ import traceback
 # =========================
 st.set_page_config(page_title="SERUR | Mapa de Ventas", layout="wide")
 
-# LOGO NUEVO (bonito)
+# LOGO
 LOGO_URL = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"
 LOGO_FALLBACK = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"
-PASSWORD = "Serur2026*"   # <-- CAMBIA AQUÍ
+PASSWORD = "Serur2026*"
+
+# TEMA (color bonito)
+ACCENT = "#0d3b82"   # azul SERUR
+ACCENT_HOVER = "#0b2f68"
 
 # CLIENTES (BASE)
 SHEET_ID_CLIENTES = "13MWoCG2_KIuhP7NPFYnudbRx99PNTwgynBbwkArewz0"
@@ -29,11 +33,63 @@ VENTAS_MESES = {
 # NEGADOS + LISTA DE PRECIOS
 SHEET_ID_NEGADOS = "12kXQRhkKS1ea5H60YGIFcWEFJ_qcKSoXSl3p59Hk7ck"
 SHEET_TAB_NEGADOS = "Hoja1"
-
 SHEET_ID_PRECIOS = "1u-e_R3AH9Qs9eiiWwbB5gJEvNFSxmaBZmjrGFtqT_8o"
 SHEET_TAB_PRECIOS = "Hoja1"
 
 IVA_FACTOR = 1.16
+
+# =========================
+# CSS GLOBAL (bonito en TODO lo clickable)
+# =========================
+st.markdown(f"""
+<style>
+/* Más aire */
+.block-container {{ padding-top: 1.2rem; padding-bottom: 2rem; }}
+
+/* BOTONES: aplica a TODO st.button */
+div.stButton > button {{
+  background: {ACCENT} !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+  border: 1px solid rgba(255,255,255,0.12) !important;
+  border-radius: 10px !important;
+  height: 44px !important;
+  width: 100% !important;
+  transition: all .12s ease-in-out !important;
+}}
+div.stButton > button:hover {{
+  background: {ACCENT_HOVER} !important;
+  transform: translateY(-1px) !important;
+}}
+div.stButton > button:active {{
+  transform: translateY(0px) !important;
+}}
+
+/* Inputs un poco más “pro” */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input {{
+  border-radius: 10px !important;
+}}
+[data-testid="stMultiSelect"] div[class*="control"] {{
+  border-radius: 10px !important;
+}}
+
+/* Tabs/controles: radio “pills” (lo hace ver más pro) */
+div[role="radiogroup"] {{
+  gap: .35rem !important;
+}}
+div[role="radiogroup"] label {{
+  border: 1px solid rgba(255,255,255,0.10) !important;
+  border-radius: 999px !important;
+  padding: .25rem .55rem !important;
+}}
+/* El seleccionado (aprox) */
+div[role="radiogroup"] label:has(input:checked) {{
+  background: rgba(13, 59, 130, 0.25) !important;
+  border-color: rgba(13, 59, 130, 0.65) !important;
+}}
+</style>
+""", unsafe_allow_html=True)
 
 # =========================
 # HELPERS
@@ -146,10 +202,6 @@ def load_ventas(sheet_id: str, tab: str):
 
 @st.cache_data(ttl=300)
 def load_precios_serur():
-    """
-    PRECIOS:
-      tip_pre | cve_art | descri | precio | codigo_sat
-    """
     df = pd.read_csv(gviz_csv_url(SHEET_ID_PRECIOS, SHEET_TAB_PRECIOS))
     df.columns = df.columns.str.strip().str.lower()
 
@@ -181,20 +233,15 @@ def load_precios_serur():
 
 @st.cache_data(ttl=300)
 def load_negados_serur():
-    """
-    NEGADOS:
-      cve_vnd | folio | cve_art | (expression) | cve_alm
-    donde (expression) = cantidad negada (puede venir negativa en ajustes/devoluciones)
-    """
     df = pd.read_csv(gviz_csv_url(SHEET_ID_NEGADOS, SHEET_TAB_NEGADOS))
     df.columns = df.columns.str.strip().str.lower()
 
     if "cve_art" not in df.columns:
         return None, "No encontré cve_art en NEGADOS."
     if "(expression)" not in df.columns:
-        return None, "No encontré (expression) en NEGADOS (ahí debe venir la cantidad negada)."
+        return None, "No encontré (expression) en NEGADOS."
     if "cve_vnd" not in df.columns:
-        return None, "No encontré cve_vnd (número de vendedor) en NEGADOS."
+        return None, "No encontré cve_vnd en NEGADOS."
 
     df["cve_art"] = df["cve_art"].astype(str).str.strip()
     df["cant_negada"] = pd.to_numeric(df["(expression)"], errors="coerce").fillna(0)
@@ -218,58 +265,63 @@ if "last_filters" not in st.session_state:
     st.session_state.last_filters = {}
 
 # =========================
-# LOGIN (CENTRADO Y BONITO)
+# LOGIN (CENTRADO EN SERIO + DIMENSIONAL BONITO)
 # =========================
 def login_screen():
-    st.markdown("""
+    st.markdown(f"""
     <style>
-      .block-container { padding-top: 2rem; }
-
-      .login-card {
+      /* Centramos verticalmente */
+      .login-wrap {{
+        min-height: calc(100vh - 160px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }}
+      .login-card {{
+        width: min(520px, 92vw);
         padding: 46px 42px 36px 42px;
-        border-radius: 16px;
+        border-radius: 18px;
         background: rgba(255,255,255,0.06);
         border: 1px solid rgba(255,255,255,0.12);
-        backdrop-filter: blur(6px);
-        box-shadow: 0 16px 40px rgba(0,0,0,0.20);
+        backdrop-filter: blur(8px);
+        box-shadow: 0 18px 55px rgba(0,0,0,0.26);
         text-align: center;
-      }
-      .title{ font-size:22px; font-weight:700; margin-top:10px; margin-bottom:8px; }
-      .sub{ opacity:0.80; font-size:13px; margin-bottom:18px; }
-
-      div.stButton > button {
-        background-color: #0d3b82;
-        color: white;
-        font-weight: 600;
-        border-radius: 8px;
-        height: 44px;
-        width: 100%;
-      }
-      div.stButton > button:hover { background-color: #0b2f68; }
-
-      [data-testid="stTextInput"] input { width: 100%; }
+      }}
+      .title {{
+        font-size: 22px;
+        font-weight: 800;
+        margin-top: 12px;
+        margin-bottom: 8px;
+      }}
+      .sub {{
+        opacity: 0.85;
+        font-size: 13px;
+        margin-bottom: 18px;
+      }}
+      /* separaciones */
+      .sp-10 {{ height: 10px; }}
     </style>
     """, unsafe_allow_html=True)
 
-    left, mid, right = st.columns([1.2, 1.6, 1.2])
+    st.markdown('<div class="login-wrap"><div class="login-card">', unsafe_allow_html=True)
 
-    with mid:
-        st.markdown('<div class="login-card">', unsafe_allow_html=True)
-        safe_logo(width=240)
-        st.markdown('<div class="title">Acceso al Dashboard de Ventas</div>', unsafe_allow_html=True)
-        st.markdown('<div class="sub">Tradición • Confianza • Innovación</div>', unsafe_allow_html=True)
+    safe_logo(width=240)
+    st.markdown('<div class="title">Acceso al Dashboard de Ventas</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub">Tradición • Confianza • Innovación</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sp-10"></div>', unsafe_allow_html=True)
 
-        pw = st.text_input("Contraseña", type="password", label_visibility="collapsed", placeholder="Contraseña")
+    pw = st.text_input("Contraseña", type="password", label_visibility="collapsed", placeholder="Contraseña")
 
-        if st.button("Ingresar"):
-            if pw == PASSWORD:
-                st.session_state.auth_ok = True
-                st.session_state.view = "menu"
-                st.rerun()
-            else:
-                st.error("Contraseña incorrecta")
+    st.markdown('<div class="sp-10"></div>', unsafe_allow_html=True)
+    if st.button("Ingresar"):
+        if pw == PASSWORD:
+            st.session_state.auth_ok = True
+            st.session_state.view = "menu"
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta")
 
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
 
 # =========================
 # MENU
@@ -279,19 +331,19 @@ def menu_screen():
     st.title("Menú principal")
     st.caption("Elige el mes para ver el mapa y KPIs.")
 
-    col1, col2, col3 = st.columns([1, 1, 2])
+    col1, col2, col3 = st.columns([1, 1, 1.2])
     with col1:
-        if st.button("📌 ENERO", width="stretch"):
+        if st.button("📌 ENERO"):
             st.session_state.mes = "ENERO"
             st.session_state.view = "dashboard"
             st.rerun()
     with col2:
-        if st.button("📌 FEBRERO", width="stretch"):
+        if st.button("📌 FEBRERO"):
             st.session_state.mes = "FEBRERO"
             st.session_state.view = "dashboard"
             st.rerun()
     with col3:
-        if st.button("🚪 Cerrar sesión", width="stretch"):
+        if st.button("🚪 Cerrar sesión"):
             st.session_state.auth_ok = False
             st.session_state.view = "login"
             st.rerun()
@@ -304,7 +356,7 @@ def negados_detail_screen():
 
     top = st.columns([1, 4, 1])
     with top[0]:
-        if st.button("⬅ Volver", width="stretch"):
+        if st.button("⬅ Volver"):
             st.session_state.view = "dashboard"
             st.rerun()
     with top[1]:
@@ -330,8 +382,6 @@ def negados_detail_screen():
         dfn = dfn[dfn["cve_vnd"].isin(selected_cve_vnd)].copy()
 
     include_negative = filtros.get("include_negative", False)
-
-    # default: NO contar negativos
     if not include_negative:
         dfn = dfn[dfn["cant_negada"] > 0].copy()
 
@@ -362,7 +412,7 @@ def negados_detail_screen():
 
     st.dataframe(
         det,
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         column_config={
             "cant_negada": st.column_config.NumberColumn("cant_negada", format="%0.2f"),
@@ -387,7 +437,7 @@ def dashboard_screen(mes: str):
 
     topbar1, topbar2 = st.columns([1, 3])
     with topbar1:
-        if st.button("⬅ Regresar al menú", width="stretch"):
+        if st.button("⬅ Regresar al menú"):
             st.session_state.view = "menu"
             st.rerun()
     with topbar2:
@@ -413,7 +463,6 @@ def dashboard_screen(mes: str):
         max_no_sales = st.slider("Máx sin compra", 0, 10000, 1500, 250, disabled=not show_no_sales)
 
     vendedor_sel = vendedores if modo == "Todos" else st.multiselect("Vendedor(es)", options=vendedores, default=vendedores)
-
     solo_top = st.number_input("Top clientes con venta (0=todos)", min_value=0, value=0, step=50)
 
     GRAY_FAKE_SALE = st.number_input(
@@ -429,14 +478,12 @@ def dashboard_screen(mes: str):
     if especie_sel:
         dfv = dfv[dfv["especie"].isin([str(x) for x in especie_sel])]
 
-    # SKUs únicos (GLOBAL según filtros)
     sku_unicos = None
     if not dfv.empty:
         sku_col = pick_sku_col(dfv)
         if sku_col:
             sku_unicos = int(dfv[sku_col].astype(str).str.strip().replace("", pd.NA).dropna().nunique())
 
-    # Agregación para mapa
     if not dfv.empty:
         grp = dfv.groupby(["cve_cte", "vendedor"], as_index=False).agg(
             venta_sin_iva=("venta_sin_iva", "sum"),
@@ -459,22 +506,18 @@ def dashboard_screen(mes: str):
 
     ventas_ctes = set(df_sales["cve_cte"].astype(str).tolist()) if not df_sales.empty else set()
 
-    # Clientes scope (sin compra)
     clientes_scope = clientes.copy() if modo == "Todos" else clientes[clientes["vendedor_cliente"].isin(vend_sel_str)].copy()
-
     df_no_sales_all = clientes_scope[~clientes_scope["cve_cte"].astype(str).isin(ventas_ctes)].copy()
     df_no_sales = df_no_sales_all
     if show_no_sales and max_no_sales > 0 and len(df_no_sales) > max_no_sales:
         df_no_sales = df_no_sales.head(int(max_no_sales))
 
-    # KPIs ventas
     venta_total = float(df_sales["venta_sin_iva"].sum()) if not df_sales.empty else 0.0
     clientes_con_venta = int(df_sales["cve_cte"].nunique()) if not df_sales.empty else 0
     ticket_prom = (venta_total / clientes_con_venta) if clientes_con_venta else 0.0
     clientes_asignados = int(clientes_scope["cve_cte"].nunique())
     cobertura = (clientes_con_venta / clientes_asignados * 100) if clientes_asignados else 0.0
 
-    # NEGADOS
     negado_valor = 0.0
     faltan_precios = 0
     selected_cve_vnd = None
@@ -492,10 +535,8 @@ def dashboard_screen(mes: str):
 
     if err_neg is None and err_pre is None and negados_df is not None and precios_df is not None:
         dfn = negados_df.copy()
-
         if selected_cve_vnd is not None:
             dfn = dfn[dfn["cve_vnd"].isin(selected_cve_vnd)].copy()
-
         if not include_negative:
             dfn = dfn[dfn["cant_negada"] > 0].copy()
 
@@ -516,26 +557,18 @@ def dashboard_screen(mes: str):
         "especie_sel": especie_sel,
     }
 
-    # KPIs (grid limpio)
     r1 = st.columns([2.2, 1.6, 1.6, 1.6, 1.5])
-    with r1[0]:
-        st.metric("Venta sin IVA", f"${venta_total:,.2f}")
-    with r1[1]:
-        st.metric("Clientes con venta", f"{clientes_con_venta:,}")
-    with r1[2]:
-        st.metric("Ticket prom.", f"${ticket_prom:,.2f}")
-    with r1[3]:
-        st.metric("Cobertura", f"{cobertura:,.1f}%")
-    with r1[4]:
-        st.metric("SKUs únicos (vendidos)", "N/D" if sku_unicos is None else f"{sku_unicos:,}")
+    r1[0].metric("Venta sin IVA", f"${venta_total:,.2f}")
+    r1[1].metric("Clientes con venta", f"{clientes_con_venta:,}")
+    r1[2].metric("Ticket prom.", f"${ticket_prom:,.2f}")
+    r1[3].metric("Cobertura", f"{cobertura:,.1f}%")
+    r1[4].metric("SKUs únicos (vendidos)", "N/D" if sku_unicos is None else f"{sku_unicos:,}")
 
     r2 = st.columns([2.2, 1.6, 1.6, 1.6, 1.5])
-    with r2[0]:
-        st.metric("$ Negado", f"${negado_valor:,.2f}")
-    with r2[1]:
-        st.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
+    r2[0].metric("$ Negado", f"${negado_valor:,.2f}")
+    r2[1].metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
     with r2[4]:
-        if st.button("📋 Ver detalle", width="stretch"):
+        if st.button("📋 Ver detalle"):
             st.session_state.view = "negados"
             st.rerun()
 
@@ -544,11 +577,10 @@ def dashboard_screen(mes: str):
     if err_pre:
         st.caption(f"⚠️ PRECIOS: {err_pre}")
     if faltan_precios > 0:
-        st.caption(f"⚠️ {faltan_precios:,} renglones negados quedaron sin precio (precio=0). Revisa lista de precios.")
+        st.caption(f"⚠️ {faltan_precios:,} renglones negados quedaron sin precio (precio=0).")
 
     st.divider()
 
-    # MAPA
     base_for_center = df_sales if not df_sales.empty else clientes_scope if not clientes_scope.empty else clientes
     center = [base_for_center["latitud"].mean(), base_for_center["longitud"].mean()]
     m = folium.Map(location=center, zoom_start=11, tiles="OpenStreetMap")
@@ -573,7 +605,6 @@ def dashboard_screen(mes: str):
             <b>Vendedor:</b> {vend}<br>
             <b>Venta sin IVA:</b> ${venta:,.2f}
             """
-
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=radius_from_sale(venta),
@@ -617,7 +648,6 @@ def dashboard_screen(mes: str):
     st.subheader("Mapa")
     st_folium(m, width="stretch", height=650)
 
-    # TABLAS
     st.divider()
 
     st.subheader("Top clientes con venta (según filtros)")
@@ -628,11 +658,9 @@ def dashboard_screen(mes: str):
     )
     st.dataframe(
         top_clientes[["cve_cte", "nombre", "venta_sin_iva"]].head(200),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
-        column_config={
-            "venta_sin_iva": st.column_config.NumberColumn("venta_sin_iva", format="$ %0.2f"),
-        }
+        column_config={"venta_sin_iva": st.column_config.NumberColumn("venta_sin_iva", format="$ %0.2f")}
     )
 
     st.subheader("Clientes sin compra (del vendedor filtrado)")
@@ -646,11 +674,10 @@ def dashboard_screen(mes: str):
             df_nc["cve_cte"].astype(str).str.lower().str.contains(b, na=False)
         ]
 
-    st.caption(f"Mostrando {len(df_nc):,} clientes sin compra (antes de limitar por mapa).")
-
+    st.caption(f"Mostrando {len(df_nc):,} clientes sin compra.")
     st.dataframe(
         df_nc[["cve_cte", "nombre", "vendedor_cliente", "latitud", "longitud"]].head(5000),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         column_config={
             "latitud": st.column_config.NumberColumn("latitud", format="%0.6f"),
@@ -659,7 +686,7 @@ def dashboard_screen(mes: str):
     )
 
 # =========================
-# ROUTER (protección anti pantalla negra)
+# ROUTER
 # =========================
 try:
     if not st.session_state.auth_ok:
