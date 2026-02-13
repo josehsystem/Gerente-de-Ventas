@@ -11,24 +11,20 @@ import traceback
 # =========================
 st.set_page_config(page_title="SERUR | Mapa de Ventas", layout="wide")
 
-# LOGO
 LOGO_URL = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"
 LOGO_FALLBACK = "https://serur.com.mx/wp-content/uploads/2025/11/SERUR-6.webp"
 PASSWORD = "Serur2026*"
 
-# TEMA (azul SERUR)
 ACCENT = "#0d3b82"
 ACCENT_HOVER = "#0b2f68"
 
 # =========================
-# CSS GLOBAL (bonito + azul en letras + azul en TODO lo clickable)
+# CSS GLOBAL
 # =========================
 st.markdown(f"""
 <style>
-/* Aire */
-.block-container {{ padding-top: 1.2rem; padding-bottom: 2rem; }}
+.block-container{{ padding-top: 1.2rem; padding-bottom: 2rem; }}
 
-/* TITULOS en azul */
 div[data-testid="stAppViewContainer"] h1,
 div[data-testid="stAppViewContainer"] h2,
 div[data-testid="stAppViewContainer"] h3,
@@ -39,12 +35,10 @@ div[data-testid="stAppViewContainer"] h6 {{
   font-weight: 900 !important;
 }}
 
-/* Caption en azul suave */
 div[data-testid="stAppViewContainer"] .stCaption {{
   color: rgba(13, 59, 130, 0.85) !important;
 }}
 
-/* BOTONES: aplica a TODO st.button */
 div.stButton > button {{
   background: {ACCENT} !important;
   color: #fff !important;
@@ -63,25 +57,9 @@ div.stButton > button:active {{
   transform: translateY(0px) !important;
 }}
 
-/* Inputs más pro */
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input {{
   border-radius: 10px !important;
-}}
-[data-testid="stMultiSelect"] div[class*="control"] {{
-  border-radius: 10px !important;
-}}
-
-/* Radio “pills” */
-div[role="radiogroup"] {{ gap: .35rem !important; }}
-div[role="radiogroup"] label {{
-  border: 1px solid rgba(255,255,255,0.10) !important;
-  border-radius: 999px !important;
-  padding: .25rem .55rem !important;
-}}
-div[role="radiogroup"] label:has(input:checked) {{
-  background: rgba(13, 59, 130, 0.25) !important;
-  border-color: rgba(13, 59, 130, 0.65) !important;
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -279,61 +257,63 @@ if "last_filters" not in st.session_state:
     st.session_state.last_filters = {}
 
 # =========================
-# LOGIN (CENTRADO)
+# LOGIN (CENTRADO REAL con columnas)
 # =========================
 def login_screen():
+    # CSS SOLO DEL LOGIN
     st.markdown(f"""
     <style>
-      .login-wrap {{
-        min-height: calc(100vh - 160px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }}
-      .login-card {{
-        width: min(520px, 92vw);
-        padding: 46px 42px 36px 42px;
+    .login-card {{
+        width: min(560px, 92vw);
+        padding: 44px 42px 34px 42px;
         border-radius: 18px;
         background: rgba(255,255,255,0.06);
         border: 1px solid rgba(255,255,255,0.12);
         backdrop-filter: blur(8px);
         box-shadow: 0 18px 55px rgba(0,0,0,0.26);
         text-align: center;
-      }}
-      .title {{
+        margin: 0 auto;
+    }}
+    .login-title {{
         font-size: 22px;
         font-weight: 900;
         margin-top: 12px;
         margin-bottom: 8px;
         color: {ACCENT};
-      }}
-      .sub {{
+    }}
+    .login-sub {{
         opacity: 0.85;
         font-size: 13px;
         margin-bottom: 18px;
         color: rgba(13,59,130,0.85);
-      }}
-      .sp-10 {{ height: 10px; }}
+    }}
+    /* que el input quede del ancho de la card */
+    .login-card [data-testid="stTextInput"] {{
+        width: 100%;
+    }}
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="login-wrap"><div class="login-card">', unsafe_allow_html=True)
-    safe_logo(width=240)
-    st.markdown('<div class="title">Acceso al Dashboard de Ventas</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub">Tradición • Confianza • Innovación</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sp-10"></div>', unsafe_allow_html=True)
+    # Centrado con columnas (esto NO se desacomoda)
+    left, mid, right = st.columns([1.6, 1.0, 1.6])
 
-    pw = st.text_input("Contraseña", type="password", label_visibility="collapsed", placeholder="Contraseña")
+    with mid:
+        st.markdown('<div class="login-card">', unsafe_allow_html=True)
+        safe_logo(width=240)
+        st.markdown('<div class="login-title">Acceso al Dashboard de Ventas</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-sub">Tradición • Confianza • Innovación</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="sp-10"></div>', unsafe_allow_html=True)
-    if st.button("Ingresar"):
-        if pw == PASSWORD:
-            st.session_state.auth_ok = True
-            st.session_state.view = "menu"
-            st.rerun()
-        else:
-            st.error("Contraseña incorrecta")
-    st.markdown('</div></div>', unsafe_allow_html=True)
+        pw = st.text_input("Contraseña", type="password", label_visibility="visible")
+
+        if st.button("Ingresar"):
+            if pw == PASSWORD:
+                st.session_state.auth_ok = True
+                st.session_state.view = "menu"
+                st.rerun()
+            else:
+                st.error("Contraseña incorrecta")
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # =========================
 # MENU
@@ -584,13 +564,6 @@ def dashboard_screen(mes: str):
             st.session_state.view = "negados"
             st.rerun()
 
-    if err_neg:
-        st.caption(f"⚠️ NEGADOS: {err_neg}")
-    if err_pre:
-        st.caption(f"⚠️ PRECIOS: {err_pre}")
-    if faltan_precios > 0:
-        st.caption(f"⚠️ {faltan_precios:,} renglones negados quedaron sin precio (precio=0).")
-
     st.divider()
 
     base_for_center = df_sales if not df_sales.empty else clientes_scope if not clientes_scope.empty else clientes
@@ -659,43 +632,6 @@ def dashboard_screen(mes: str):
 
     st.subheader("Mapa")
     st_folium(m, width="stretch", height=650)
-
-    st.divider()
-
-    st.subheader("Top clientes con venta (según filtros)")
-    top_clientes = (
-        df_sales.groupby(["cve_cte", "nombre"], as_index=False)["venta_sin_iva"]
-        .sum()
-        .sort_values("venta_sin_iva", ascending=False)
-    )
-    st.dataframe(
-        top_clientes[["cve_cte", "nombre", "venta_sin_iva"]].head(200),
-        use_container_width=True,
-        hide_index=True,
-        column_config={"venta_sin_iva": st.column_config.NumberColumn("venta_sin_iva", format="$ %0.2f")}
-    )
-
-    st.subheader("Clientes sin compra (del vendedor filtrado)")
-    bus = st.text_input("Buscar (nombre o clave)", value="", placeholder="Ej: FERNANDO o 7405")
-    df_nc = df_no_sales_all.copy()
-
-    if bus.strip():
-        b = bus.strip().lower()
-        df_nc = df_nc[
-            df_nc["nombre"].astype(str).str.lower().str.contains(b, na=False) |
-            df_nc["cve_cte"].astype(str).str.lower().str.contains(b, na=False)
-        ]
-
-    st.caption(f"Mostrando {len(df_nc):,} clientes sin compra.")
-    st.dataframe(
-        df_nc[["cve_cte", "nombre", "vendedor_cliente", "latitud", "longitud"]].head(5000),
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "latitud": st.column_config.NumberColumn("latitud", format="%0.6f"),
-            "longitud": st.column_config.NumberColumn("longitud", format="%0.6f"),
-        }
-    )
 
 # =========================
 # ROUTER
