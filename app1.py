@@ -74,7 +74,6 @@ def pick_sku_col(df: pd.DataFrame):
     return None
 
 def normalize_int_series(s):
-    # regresa Int64 (con NA) para comparar cve_vnd
     x = pd.to_numeric(pd.Series(s), errors="coerce")
     return x.round(0).astype("Int64")
 
@@ -112,7 +111,7 @@ def load_ventas(sheet_id: str, tab: str):
 
     df = ensure_col(df, "cve_cte", "")
     df = ensure_col(df, "vendedor", "")
-    df = ensure_col(df, "cve_vnd", None)   # <--- si lo agregaste en ventas, lo toma
+    df = ensure_col(df, "cve_vnd", None)
     df = ensure_col(df, "fecha", "")
     df = ensure_col(df, "especie", "")
     df = ensure_col(df, "total", 0)
@@ -124,7 +123,6 @@ def load_ventas(sheet_id: str, tab: str):
     df["especie"] = df["especie"].astype(str).str.strip()
     df["fecha"] = pd.to_datetime(df.get("fecha"), errors="coerce", dayfirst=True)
 
-    # normaliza cve_vnd si viene
     if "cve_vnd" in df.columns:
         df["cve_vnd"] = normalize_int_series(df["cve_vnd"])
 
@@ -154,12 +152,23 @@ def load_precios_serur():
     df["cve_art"] = df["cve_art"].astype(str).str.strip()
     df["precio"] = pd.to_numeric(df["precio"], errors="coerce").fillna(0)
 
+    # descri opcional
+    if "descri" in df.columns:
+        df["descri"] = df["descri"].astype(str).fillna("").str.strip()
+    else:
+        df["descri"] = ""
+
     if "tip_pre" in df.columns:
         df["tip_pre"] = pd.to_numeric(df["tip_pre"], errors="coerce").fillna(0).astype(int)
         if (df["tip_pre"] == 1).any():
             df = df[df["tip_pre"] == 1].copy()
 
-    df = df.groupby("cve_art", as_index=False)["precio"].max()
+    # dejamos 1 fila por cve_art, conservando precio y descri
+    df = (
+        df.sort_values(["cve_art", "precio"], ascending=[True, False])
+          .groupby("cve_art", as_index=False)
+          .agg(precio=("precio", "max"), descri=("descri", "first"))
+    )
     return df, None
 
 @st.cache_data(ttl=300)
@@ -194,6 +203,10 @@ if "view" not in st.session_state:
     st.session_state.view = "login"
 if "mes" not in st.session_state:
     st.session_state.mes = "ENERO"
+if "negados_detail" not in st.session_state:
+    st.session_state.negados_detail = None
+if "negados_detail_filters" not in st.session_state:
+    st.session_state.negados_detail_filters = None
 
 # =========================
 # LOGIN
@@ -255,6 +268,49 @@ def menu_screen():
             st.session_state.auth_ok = False
             st.session_state.view = "login"
             st.rerun()
+
+# =========================
+# VISTA: DETALLE NEGADOS
+# =========================
+def negados_detail_screen():
+    st.image(LOGO_URL, width=170)
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        if st.button("⬅ Regresar al dashboard", use_container_width=True):
+            st.session_state.view = "dashboard"
+            st.rerun()
+    with c2:
+        st.title("Detalle de Negados")
+
+    meta = st.session_state.negados_detail_filters or {}
+    mes = meta.get("mes", "")
+    modo = meta.get("modo", "")
+    vend = meta.get("vendedores", [])
+    esp = meta.get("especies", [])
+
+    st.caption(
+        f"Filtros usados: Mes={mes} | Vendedores={('Todos' if modo=='Todos' else ', '.join(vend) if vend else 'N/D')} "
+        f"| Especies={(', '.join(esp) if esp else 'Todas')}"
+    )
+
+    df = st.session_state.negados_detail
+    if df is None or df.empty:
+        st.warning("No hay detalle de negados para mostrar con los filtros actuales.")
+        return
+
+    total_negado = float(df["valor_negado"].sum()) if "valor_negado" in df.columns else 0.0
+
+    st.subheader("Negado por artículo (mayor a menor)")
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "valor_negado": st.column_config.NumberColumn("valor_negado", format="$ %0.2f"),
+            "pct_total": st.column_config.NumberColumn("% del total", format="%0.2f%%"),
+        }
+    )
+    st.caption(f"Total negado (según filtros): ${total_negado:,.2f}")
 
 # =========================
 # DASHBOARD
@@ -366,43 +422,56 @@ def dashboard_screen(mes: str):
     cobertura = (clientes_con_venta / clientes_asignados * 100) if clientes_asignados else 0.0
 
     # =========================
-    # NEGADOS (AHORA SÍ FILTRA POR VENDEDOR cve_vnd)
+    # NEGADOS
     # =========================
     negado_valor = 0.0
     faltan_precios = 0
+    detalle_negados = pd.DataFrame()
 
-    # 1) obtenemos cve_vnd seleccionados
     selected_cve_vnd = None
     if modo == "Todos":
-        selected_cve_vnd = None  # no filtra (global real)
+        selected_cve_vnd = None  # global real
     else:
-        # si VENTAS tiene cve_vnd, lo usamos para mapear vendedor->cve_vnd
         if "cve_vnd" in ventas.columns and ventas["cve_vnd"].notna().any():
             map_df = ventas[["vendedor", "cve_vnd"]].dropna().copy()
             map_df["vendedor"] = map_df["vendedor"].astype(str).str.strip()
             map_df["cve_vnd"] = normalize_int_series(map_df["cve_vnd"])
             selected_cve_vnd = sorted(map_df[map_df["vendedor"].isin(vend_sel_str)]["cve_vnd"].dropna().unique().tolist())
         else:
-            # fallback: intentar convertir "vendedor" a número si viene como "3", "7", etc.
             selected_cve_vnd = sorted(normalize_int_series(vend_sel_str).dropna().unique().tolist())
 
     if err_neg is None and err_pre is None and negados_df is not None and precios_df is not None:
         dfn = negados_df.copy()
 
-        # 2) filtra por cve_vnd si aplica
         if selected_cve_vnd is not None:
             dfn = dfn[dfn["cve_vnd"].isin(selected_cve_vnd)].copy()
 
         dfn = dfn.merge(precios_df, on="cve_art", how="left")
         dfn["precio"] = pd.to_numeric(dfn["precio"], errors="coerce").fillna(0)
+        dfn["descri"] = dfn.get("descri", "").astype(str).fillna("").str.strip()
 
-        negado_valor = float((dfn["cant_negada"] * dfn["precio"]).sum())
+        dfn["valor_negado"] = dfn["cant_negada"] * dfn["precio"]
+        negado_valor = float(dfn["valor_negado"].sum())
         faltan_precios = int(((dfn["cant_negada"] > 0) & (dfn["precio"] <= 0)).sum())
+
+        # resumen por artículo (clave, descripción, valor, %)
+        detalle = (
+            dfn.groupby(["cve_art", "descri"], as_index=False)
+               .agg(valor_negado=("valor_negado", "sum"))
+               .sort_values("valor_negado", ascending=False)
+        )
+        if negado_valor > 0:
+            detalle["pct_total"] = (detalle["valor_negado"] / negado_valor) * 100
+        else:
+            detalle["pct_total"] = 0.0
+
+        # columnas como pediste
+        detalle_negados = detalle[["cve_art", "descri", "valor_negado", "pct_total"]].copy()
 
     pct_negado_vs_vendido = (negado_valor / venta_total * 100) if venta_total > 0 else 0.0
 
     # =========================
-    # KPIs (NEGADOS ABAJO, NO EN LA MISMA FILA)
+    # KPIs (NEGADOS + BOTÓN)
     # =========================
     if mostrar_skus:
         k1, k2, k3, k4, k5 = st.columns(5)
@@ -411,10 +480,6 @@ def dashboard_screen(mes: str):
         k3.metric("Ticket prom.", f"${ticket_prom:,.2f}")
         k4.metric("Cobertura", f"{cobertura:,.1f}%")
         k5.metric("SKUs únicos (vendidos)", "N/D" if sku_unicos is None else f"{sku_unicos:,}")
-
-        n1, n2 = st.columns([1, 1])
-        n1.metric("$ Negado", f"${negado_valor:,.2f}")
-        n2.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
     else:
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Venta sin IVA", f"${venta_total:,.2f}")
@@ -422,9 +487,23 @@ def dashboard_screen(mes: str):
         k3.metric("Ticket prom.", f"${ticket_prom:,.2f}")
         k4.metric("Cobertura", f"{cobertura:,.1f}%")
 
-        n1, n2 = st.columns([1, 1])
-        n1.metric("$ Negado", f"${negado_valor:,.2f}")
-        n2.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
+    # NEGADOS en fila aparte + botón a la derecha
+    n1, nbtn, n2 = st.columns([1.1, 0.9, 1.2])
+    with n1:
+        st.metric("$ Negado", f"${negado_valor:,.2f}")
+    with nbtn:
+        if st.button("🔎 Ver detalle", use_container_width=True, disabled=(detalle_negados is None or detalle_negados.empty)):
+            st.session_state.negados_detail = detalle_negados
+            st.session_state.negados_detail_filters = {
+                "mes": mes,
+                "modo": modo,
+                "vendedores": vend_sel_str,
+                "especies": [str(x) for x in especie_sel] if especie_sel else [],
+            }
+            st.session_state.view = "negados"
+            st.rerun()
+    with n2:
+        st.metric("% Negado vs Vendido", f"{pct_negado_vs_vendido:,.2f}%")
 
     if err_neg:
         st.caption(f"⚠️ NEGADOS: {err_neg}")
@@ -471,7 +550,7 @@ def dashboard_screen(mes: str):
                 fill_opacity=0.75,
                 popup=folium.Popup(popup_html, max_width=420),
                 tooltip=folium.Tooltip(label, sticky=True),
-            ).add_to(layer_sales)
+                ).add_to(layer_sales)
 
     layer_sales.add_to(m)
 
@@ -536,28 +615,3 @@ def dashboard_screen(mes: str):
             df_nc["nombre"].astype(str).str.lower().str.contains(b, na=False) |
             df_nc["cve_cte"].astype(str).str.lower().str.contains(b, na=False)
         ]
-
-    st.caption(f"Mostrando {len(df_nc):,} clientes sin compra (antes de limitar por mapa).")
-
-    st.dataframe(
-        df_nc[["cve_cte", "nombre", "vendedor_cliente", "latitud", "longitud"]].head(5000),
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "latitud": st.column_config.NumberColumn("latitud", format="%0.6f"),
-            "longitud": st.column_config.NumberColumn("longitud", format="%0.6f"),
-        }
-    )
-
-# =========================
-# ROUTER
-# =========================
-if not st.session_state.auth_ok:
-    st.session_state.view = "login"
-
-if st.session_state.view == "login":
-    login_screen()
-elif st.session_state.view == "menu":
-    menu_screen()
-else:
-    dashboard_screen(st.session_state.mes)
