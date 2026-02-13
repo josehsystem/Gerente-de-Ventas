@@ -806,6 +806,7 @@ def dashboard_screen(mes: str):
                 fill_opacity=0.75,
                 popup=folium.Popup(popup_html, max_width=420),
                 tooltip=folium.Tooltip(label, sticky=True),
+                add_to=layer_sales
             ).add_to(layer_sales)
 
     layer_sales.add_to(m)
@@ -840,6 +841,45 @@ def dashboard_screen(mes: str):
 
     st.subheader("Mapa")
     st_folium(m, width="stretch", height=650)
+
+    # =========================
+    # ✅ NUEVO (SIN TOCAR LO DEMÁS):
+    # Tabla + exportación de "clientes sin compra" con coordenadas
+    # =========================
+    if show_no_sales:
+        st.divider()
+        st.subheader("Clientes sin compra (para exportar coordenadas)")
+
+        if df_no_sales_all.empty:
+            st.info("No hay clientes sin compra con los filtros actuales.")
+        else:
+            export_df = df_no_sales_all.copy()
+            export_df = export_df.rename(columns={
+                "vendedor_cliente": "vendedor_asignado",
+                "latitud": "lat",
+                "longitud": "lon",
+            })
+
+            # Columnas “bonitas” (si existen)
+            cols_out = []
+            for c in ["cve_cte", "nombre", "vendedor_asignado", "lat", "lon"]:
+                if c in export_df.columns:
+                    cols_out.append(c)
+
+            export_df = export_df[cols_out].copy() if cols_out else export_df.copy()
+            export_df.insert(0, "mes", mes)
+            export_df.insert(1, "filtro_vendedor", ", ".join(vend_sel_str) if vend_sel_str else "Todos")
+
+            st.caption(f"Mostrando {min(len(export_df), int(max_no_sales) if max_no_sales else len(export_df)):,} de {len(export_df):,} (si usas el límite).")
+            st.dataframe(export_df, use_container_width=True, hide_index=True)
+
+            csv_bytes = export_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+            st.download_button(
+                "⬇ Descargar CSV (clientes_sin_compra_coordenadas.csv)",
+                data=csv_bytes,
+                file_name="clientes_sin_compra_coordenadas.csv",
+                mime="text/csv",
+            )
 
 # =========================
 # ROUTER
