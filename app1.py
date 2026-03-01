@@ -186,10 +186,14 @@ SHEET_TAB_CLIENTES = "Hoja1"
 VENTAS_MESES = {
     "ENERO": {"sheet_id": "1UpYQT6ErO3Xj3xdZ36IYJPRR9uDRQw-eYui9B_Y-JwU", "tab": "Hoja1"},
     "FEBRERO": {"sheet_id": "1cPgQEFUx-6oId3-y3DAVwmwjaZozKu9L10D9uZnR7bE", "tab": "Hoja1"},
+    "MARZO": {"sheet_id": "1BDeaiKQsxGofd3JUU6ZubKUc9pFZtlFGM1AwAwR0JDE", "tab": "Hoja1"},
 }
 
-SHEET_ID_NEGADOS = "12kXQRhkKS1ea5H60YGIFcWEFJ_qcKSoXSl3p59Hk7ck"
-SHEET_TAB_NEGADOS = "Hoja1"
+# ✅ NEGADOS: se queda el anterior, pero MARZO usa otro sheet_id
+NEGADOS_MESES = {
+    "DEFAULT": {"sheet_id": "12kXQRhkKS1ea5H60YGIFcWEFJ_qcKSoXSl3p59Hk7ck", "tab": "Hoja1"},
+    "MARZO": {"sheet_id": "1YzWlGg_3G0vqk4o3H13nM9jQxoC5tOYtieZqdBNPfxs", "tab": "Hoja1"},
+}
 
 SHEET_ID_PRECIOS = "1u-e_R3AH9Qs9eiiWwbB5gJEvNFSxmaBZmjrGFtqT_8o"
 SHEET_TAB_PRECIOS = "Hoja1"
@@ -286,8 +290,8 @@ def load_precios_serur():
     return agg, None
 
 @st.cache_data(ttl=300)
-def load_negados_serur():
-    df = pd.read_csv(gviz_csv_url(SHEET_ID_NEGADOS, SHEET_TAB_NEGADOS))
+def load_negados_serur(sheet_id: str, tab: str):
+    df = pd.read_csv(gviz_csv_url(sheet_id, tab))
     df.columns = df.columns.str.strip().str.lower()
 
     if "cve_art" not in df.columns:
@@ -305,6 +309,11 @@ def load_negados_serur():
     df = ensure_col(df, "cve_alm", "")
 
     return df[["cve_vnd", "cve_art", "cant_negada", "folio", "cve_alm"]].copy(), None
+
+def get_negados_cfg(mes: str):
+    if str(mes).strip().upper() == "MARZO":
+        return NEGADOS_MESES["MARZO"]
+    return NEGADOS_MESES["DEFAULT"]
 
 # =========================
 # ESTADO
@@ -418,7 +427,7 @@ def pick_month_screen():
         st.title("Elige el mes")
         st.caption("Selecciona el mes y te llevo a la vista.")
 
-    col1, col2 = st.columns([1, 1])
+    col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
         if st.button("📌 ENERO"):
             st.session_state.mes = "ENERO"
@@ -427,6 +436,11 @@ def pick_month_screen():
     with col2:
         if st.button("📌 FEBRERO"):
             st.session_state.mes = "FEBRERO"
+            st.session_state.view = st.session_state.next_view
+            st.rerun()
+    with col3:
+        if st.button("📌 MARZO"):
+            st.session_state.mes = "MARZO"
             st.session_state.view = st.session_state.next_view
             st.rerun()
 
@@ -446,8 +460,10 @@ def negados_detail_screen():
         st.caption("Ordenado de mayor a menor valor. Respeta filtros (vendedor/especie).")
 
     filtros = st.session_state.last_filters or {}
+    mes = filtros.get("mes", st.session_state.mes)
 
-    negados_df, err_neg = load_negados_serur()
+    neg_cfg = get_negados_cfg(mes)
+    negados_df, err_neg = load_negados_serur(neg_cfg["sheet_id"], neg_cfg["tab"])
     precios_df, err_pre = load_precios_serur()
 
     if err_neg:
@@ -622,14 +638,15 @@ def especies_screen(mes: str):
     )
 
 # =========================
-# DASHBOARD (MAPA) - COMO LO TENÍAS
+# DASHBOARD (MAPA)
 # =========================
 def dashboard_screen(mes: str):
     cfg = VENTAS_MESES[mes]
     ventas = load_ventas(cfg["sheet_id"], cfg["tab"])
     clientes = load_clientes()
 
-    negados_df, err_neg = load_negados_serur()
+    neg_cfg = get_negados_cfg(mes)
+    negados_df, err_neg = load_negados_serur(neg_cfg["sheet_id"], neg_cfg["tab"])
     precios_df, err_pre = load_precios_serur()
 
     safe_logo(width=190)
@@ -842,10 +859,6 @@ def dashboard_screen(mes: str):
     st.subheader("Mapa")
     st_folium(m, width="stretch", height=650)
 
-    # =========================
-    # ✅ NUEVO (SIN TOCAR LO DEMÁS):
-    # Tabla + exportación de "clientes sin compra" con coordenadas
-    # =========================
     if show_no_sales:
         st.divider()
         st.subheader("Clientes sin compra (para exportar coordenadas)")
@@ -860,7 +873,6 @@ def dashboard_screen(mes: str):
                 "longitud": "lon",
             })
 
-            # Columnas “bonitas” (si existen)
             cols_out = []
             for c in ["cve_cte", "nombre", "vendedor_asignado", "lat", "lon"]:
                 if c in export_df.columns:
