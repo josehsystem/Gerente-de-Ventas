@@ -177,6 +177,14 @@ def pareto_80_by_especie(df_sales: pd.DataFrame, threshold=0.80):
 
     return x
 
+def escape_excel_text(val):
+    if pd.isna(val):
+        return ""
+    s = str(val).strip()
+    if s.startswith(("=", "+", "-", "@")):
+        return "'" + s
+    return s
+
 def build_product_export(dfv: pd.DataFrame, mes: str, modo: str, vend_sel_str, especie_sel):
     if dfv.empty:
         return pd.DataFrame()
@@ -215,6 +223,10 @@ def build_product_export(dfv: pd.DataFrame, mes: str, modo: str, vend_sel_str, e
         except Exception:
             pass
 
+    for col in export_df.columns:
+        if export_df[col].dtype == "object":
+            export_df[col] = export_df[col].apply(escape_excel_text)
+
     return export_df
 
 def build_no_vendido_export(dfv: pd.DataFrame, precios_df: pd.DataFrame, mes: str, modo: str, vend_sel_str, especie_sel):
@@ -248,6 +260,10 @@ def build_no_vendido_export(dfv: pd.DataFrame, precios_df: pd.DataFrame, mes: st
     no_vendido.insert(1, "modo", modo)
     no_vendido.insert(2, "filtro_vendedor", ", ".join(vend_sel_str) if vend_sel_str else "Todos")
     no_vendido.insert(3, "filtro_especie", ", ".join([str(x) for x in especie_sel]) if especie_sel else "Todas")
+
+    for col in no_vendido.columns:
+        if no_vendido[col].dtype == "object":
+            no_vendido[col] = no_vendido[col].apply(escape_excel_text)
 
     return no_vendido
 
