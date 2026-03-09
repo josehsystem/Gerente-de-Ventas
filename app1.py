@@ -177,6 +177,48 @@ def pareto_80_by_especie(df_sales: pd.DataFrame, threshold=0.80):
 
     return x
 
+def build_product_export(dfv: pd.DataFrame, mes: str, modo: str, vend_sel_str, especie_sel):
+    if dfv.empty:
+        return pd.DataFrame()
+
+    export_df = dfv.copy()
+
+    sku_col = pick_sku_col(export_df)
+
+    cols_preferidas = [
+        "fecha",
+        "vendedor",
+        "cve_vnd",
+        "cve_cte",
+        "especie",
+        "cantidad",
+        "importe",
+        "total",
+        "venta_sin_iva",
+    ]
+
+    if sku_col and sku_col not in cols_preferidas:
+        insert_pos = 5 if len(cols_preferidas) >= 5 else len(cols_preferidas)
+        cols_preferidas.insert(insert_pos, sku_col)
+
+    cols_existentes = [c for c in cols_preferidas if c in export_df.columns]
+
+    extras = [c for c in export_df.columns if c not in cols_existentes]
+    export_df = export_df[cols_existentes + extras].copy()
+
+    export_df.insert(0, "mes", mes)
+    export_df.insert(1, "modo", modo)
+    export_df.insert(2, "filtro_vendedor", ", ".join(vend_sel_str) if vend_sel_str else "Todos")
+    export_df.insert(3, "filtro_especie", ", ".join([str(x) for x in especie_sel]) if especie_sel else "Todas")
+
+    if "fecha" in export_df.columns:
+        try:
+            export_df["fecha"] = pd.to_datetime(export_df["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+    return export_df
+
 # =========================
 # DATA SOURCES
 # =========================
@@ -790,6 +832,33 @@ def dashboard_screen(mes: str):
             st.rerun()
 
     st.divider()
+
+    # =========================
+    # NUEVO: DESCARGA DE PRODUCTOS VENDIDOS
+    # =========================
+    export_df = build_product_export(
+        dfv=dfv,
+        mes=mes,
+        modo=modo,
+        vend_sel_str=vend_sel_str,
+        especie_sel=especie_sel,
+    )
+
+    col_exp1, col_exp2 = st.columns([2.2, 4.8])
+    with col_exp1:
+        csv_name = f"productos_vendidos_{mes.lower()}_{'global' if modo == 'Todos' else 'vendedor'}.csv"
+        st.download_button(
+            "⬇ Descargar productos vendidos",
+            data=export_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+            file_name=csv_name,
+            mime="text/csv",
+            disabled=export_df.empty,
+        )
+    with col_exp2:
+        if export_df.empty:
+            st.caption("No hay productos vendidos con los filtros actuales.")
+        else:
+            st.caption(f"Descarga el detalle de productos vendidos con los filtros actuales. Registros: {len(export_df):,}")
 
     base_for_center = df_sales if not df_sales.empty else clientes_scope if not clientes_scope.empty else clientes
     center = [base_for_center["latitud"].mean(), base_for_center["longitud"].mean()]
