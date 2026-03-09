@@ -182,7 +182,6 @@ def build_product_export(dfv: pd.DataFrame, mes: str, modo: str, vend_sel_str, e
         return pd.DataFrame()
 
     export_df = dfv.copy()
-
     sku_col = pick_sku_col(export_df)
 
     cols_preferidas = [
@@ -202,7 +201,6 @@ def build_product_export(dfv: pd.DataFrame, mes: str, modo: str, vend_sel_str, e
         cols_preferidas.insert(insert_pos, sku_col)
 
     cols_existentes = [c for c in cols_preferidas if c in export_df.columns]
-
     extras = [c for c in export_df.columns if c not in cols_existentes]
     export_df = export_df[cols_existentes + extras].copy()
 
@@ -219,6 +217,40 @@ def build_product_export(dfv: pd.DataFrame, mes: str, modo: str, vend_sel_str, e
 
     return export_df
 
+def build_no_vendido_export(dfv: pd.DataFrame, precios_df: pd.DataFrame, mes: str, modo: str, vend_sel_str, especie_sel):
+    if precios_df is None or precios_df.empty:
+        return pd.DataFrame(columns=["mes", "modo", "filtro_vendedor", "filtro_especie", "sku", "descri", "precio"])
+
+    sku_col = pick_sku_col(dfv) if not dfv.empty else None
+
+    vendidos = set()
+    if sku_col and sku_col in dfv.columns:
+        vendidos = set(
+            dfv[sku_col]
+            .astype(str)
+            .str.strip()
+            .replace("", pd.NA)
+            .dropna()
+            .tolist()
+        )
+
+    base = precios_df.copy()
+    base["cve_art"] = base["cve_art"].astype(str).str.strip()
+    base["descri"] = base.get("descri", "").astype(str).fillna("").str.strip()
+    base["precio"] = pd.to_numeric(base.get("precio", 0), errors="coerce").fillna(0)
+
+    no_vendido = base[~base["cve_art"].isin(vendidos)].copy()
+    no_vendido = no_vendido.rename(columns={"cve_art": "sku"})
+    no_vendido = no_vendido[["sku", "descri", "precio"]].copy()
+    no_vendido = no_vendido.sort_values(["descri", "sku"], ascending=[True, True]).reset_index(drop=True)
+
+    no_vendido.insert(0, "mes", mes)
+    no_vendido.insert(1, "modo", modo)
+    no_vendido.insert(2, "filtro_vendedor", ", ".join(vend_sel_str) if vend_sel_str else "Todos")
+    no_vendido.insert(3, "filtro_especie", ", ".join([str(x) for x in especie_sel]) if especie_sel else "Todas")
+
+    return no_vendido
+
 # =========================
 # DATA SOURCES
 # =========================
@@ -231,7 +263,6 @@ VENTAS_MESES = {
     "MARZO": {"sheet_id": "1BDeaiKQsxGofd3JUU6ZubKUc9pFZtlFGM1AwAwR0JDE", "tab": "Hoja1"},
 }
 
-# ✅ NEGADOS: se queda el anterior, pero MARZO usa otro sheet_id
 NEGADOS_MESES = {
     "DEFAULT": {"sheet_id": "12kXQRhkKS1ea5H60YGIFcWEFJ_qcKSoXSl3p59Hk7ck", "tab": "Hoja1"},
     "MARZO": {"sheet_id": "1YzWlGg_3G0vqk4o3H13nM9jQxoC5tOYtieZqdBNPfxs", "tab": "Hoja1"},
@@ -369,7 +400,7 @@ if "mes" not in st.session_state:
 if "last_filters" not in st.session_state:
     st.session_state.last_filters = {}
 if "next_view" not in st.session_state:
-    st.session_state.next_view = "dashboard"  # a dónde ir después de elegir mes
+    st.session_state.next_view = "dashboard"
 
 # =========================
 # LOGIN
@@ -430,7 +461,7 @@ def login_screen():
         st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# MENU (solo vistas)
+# MENU
 # =========================
 def menu_screen():
     safe_logo(width=220)
@@ -455,7 +486,7 @@ def menu_screen():
             st.rerun()
 
 # =========================
-# PANTALLA ELEGIR MES (para cualquier vista)
+# PICK MONTH
 # =========================
 def pick_month_screen():
     safe_logo(width=220)
@@ -563,7 +594,7 @@ def negados_detail_screen():
     )
 
 # =========================
-# VISTA: VENTAS POR ESPECIE
+# ESPECIES
 # =========================
 def especies_screen(mes: str):
     cfg = VENTAS_MESES[mes]
@@ -680,7 +711,7 @@ def especies_screen(mes: str):
     )
 
 # =========================
-# DASHBOARD (MAPA)
+# DASHBOARD
 # =========================
 def dashboard_screen(mes: str):
     cfg = VENTAS_MESES[mes]
@@ -833,10 +864,7 @@ def dashboard_screen(mes: str):
 
     st.divider()
 
-    # =========================
-    # NUEVO: DESCARGA DE PRODUCTOS VENDIDOS
-    # =========================
-    export_df = build_product_export(
+    export_vendidos_df = build_product_export(
         dfv=dfv,
         mes=mes,
         modo=modo,
@@ -844,21 +872,42 @@ def dashboard_screen(mes: str):
         especie_sel=especie_sel,
     )
 
-    col_exp1, col_exp2 = st.columns([2.2, 4.8])
+    export_no_vendido_df = build_no_vendido_export(
+        dfv=dfv,
+        precios_df=precios_df if err_pre is None else None,
+        mes=mes,
+        modo=modo,
+        vend_sel_str=vend_sel_str,
+        especie_sel=especie_sel,
+    )
+
+    col_exp1, col_exp2, col_exp3 = st.columns([2.2, 2.2, 3.6])
     with col_exp1:
         csv_name = f"productos_vendidos_{mes.lower()}_{'global' if modo == 'Todos' else 'vendedor'}.csv"
         st.download_button(
             "⬇ Descargar productos vendidos",
-            data=export_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+            data=export_vendidos_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
             file_name=csv_name,
             mime="text/csv",
-            disabled=export_df.empty,
+            disabled=export_vendidos_df.empty,
         )
     with col_exp2:
-        if export_df.empty:
+        csv_name_nv = f"no_vendido_vs_lista_{mes.lower()}_{'global' if modo == 'Todos' else 'vendedor'}.csv"
+        st.download_button(
+            "⬇ Descargar no vendido vs lista",
+            data=export_no_vendido_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+            file_name=csv_name_nv,
+            mime="text/csv",
+            disabled=export_no_vendido_df.empty,
+        )
+    with col_exp3:
+        if export_vendidos_df.empty:
             st.caption("No hay productos vendidos con los filtros actuales.")
         else:
-            st.caption(f"Descarga el detalle de productos vendidos con los filtros actuales. Registros: {len(export_df):,}")
+            st.caption(
+                f"Vendidos: {len(export_vendidos_df):,} registros. "
+                f"No vendidos vs lista: {len(export_no_vendido_df):,} SKUs."
+            )
 
     base_for_center = df_sales if not df_sales.empty else clientes_scope if not clientes_scope.empty else clientes
     center = [base_for_center["latitud"].mean(), base_for_center["longitud"].mean()]
@@ -892,7 +941,6 @@ def dashboard_screen(mes: str):
                 fill_opacity=0.75,
                 popup=folium.Popup(popup_html, max_width=420),
                 tooltip=folium.Tooltip(label, sticky=True),
-                add_to=layer_sales
             ).add_to(layer_sales)
 
     layer_sales.add_to(m)
