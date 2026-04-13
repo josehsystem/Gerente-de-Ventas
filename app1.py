@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import folium
@@ -105,6 +106,9 @@ st.markdown(
 def gviz_csv_url(sheet_id: str, tab: str) -> str:
     return f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={quote(tab)}"
 
+def export_csv_url(sheet_id: str, gid: str = "0") -> str:
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+
 def to_num(s):
     return pd.to_numeric(s, errors="coerce").fillna(0)
 
@@ -115,6 +119,14 @@ def ensure_col(df_, col, default=""):
 
 def clean_text(x):
     return str(x).strip() if pd.notnull(x) else ""
+
+def find_col_by_keywords(df: pd.DataFrame, keywords):
+    kws = [str(k).strip().lower() for k in keywords]
+    for col in df.columns:
+        norm = str(col).strip().lower()
+        if all(k in norm for k in kws):
+            return col
+    return None
 
 def make_color_map(values):
     palette = [
@@ -349,6 +361,8 @@ MESES_ORDEN = ["ENERO", "FEBRERO", "MARZO", "ABRIL"]
 
 SHEET_ID_PRECIOS = "1u-e_R3AH9Qs9eiiWwbB5gJEvNFSxmaBZmjrGFtqT_8o"
 SHEET_TAB_PRECIOS = "Hoja1"
+META_ABRIL_SHEET_ID = "13T3Wk3A9xjKNOesm1LvXgyZVFJnMh5bdk-oYoQTM2_E"
+META_ABRIL_GID = "0"
 IVA_FACTOR = 1.16
 
 def get_prev_month(mes: str):
@@ -415,6 +429,33 @@ def load_ventas(sheet_id: str, tab: str):
         df["venta_sin_iva"] = df["cantidad"] * df["importe"]
 
     return df
+
+@st.cache_data(ttl=300)
+def load_meta_abril():
+    df = pd.read_csv(export_csv_url(META_ABRIL_SHEET_ID, META_ABRIL_GID))
+    df.columns = df.columns.str.strip().str.lower()
+
+    col_vendedor = find_col_by_keywords(df, ["vendedor"])
+    col_nombre = find_col_by_keywords(df, ["nombre"])
+    col_abril_2025 = find_col_by_keywords(df, ["abril", "2025"])
+    col_objetivo = find_col_by_keywords(df, ["objetivo"])
+
+    if not col_vendedor:
+        return None, "No encontré la columna VENDEDOR en metas de abril."
+    if not col_abril_2025:
+        return None, "No encontré la columna abril 2025 en metas de abril."
+    if not col_objetivo:
+        return None, "No encontré la columna OBJETIVO en metas de abril."
+
+    out = pd.DataFrame()
+    out["vendedor"] = pd.to_numeric(df[col_vendedor], errors="coerce").round(0).astype("Int64").astype(str).str.replace("<NA>", "", regex=False).str.strip()
+    out["nombre_meta"] = df[col_nombre].astype(str).fillna("").str.strip() if col_nombre else ""
+    out["venta_abril_2025"] = pd.to_numeric(df[col_abril_2025], errors="coerce").fillna(0.0)
+    out["objetivo"] = pd.to_numeric(df[col_objetivo], errors="coerce").fillna(0.0)
+
+    out = out[out["vendedor"] != ""].copy()
+    out = out.drop_duplicates(subset=["vendedor"], keep="first").reset_index(drop=True)
+    return out, None
 
 @st.cache_data(ttl=300)
 def load_precios_serur():
@@ -984,26 +1025,65 @@ def dashboard_screen(mes: str):
     if perf_vendedores.empty:
         st.info("No hay información suficiente para ventas por vendedor.")
     else:
-        perf_display = perf_vendedores[["vendedor", "venta_actual", "clientes_actual", "clientes_asignados", "cobertura_pct", "ticket_promedio"]].copy()
-        perf_display = perf_display.rename(columns={
-            "venta_actual": f"Venta {mes}",
-            "clientes_actual": f"Clientes {mes}",
-            "clientes_asignados": "Asignados",
-            "cobertura_pct": "Cobertura %",
-            "ticket_promedio": "Ticket prom.",
-        })
+        if mes == "ABRIL":
+            metas_abril, err_meta = load_meta_abril()
+            if err_meta:
+                st.error(f"METAS ABRIL: {err_meta}")
+            else:
+                perf_base = perf_vendedores[["vendedor", "venta_actual"]].copy()
+                perf_base["vendedor"] = perf_base["vendedor"].astype(str).str.strip()
+                metas_abril["vendedor"] = metas_abril["vendedor"].astype(str).str.strip()
 
-        st.dataframe(
-            styled_table(
-                perf_display,
-                money_cols=[f"Venta {mes}", "Ticket prom."],
-                int_cols=[f"Clientes {mes}", "Asignados"],
-                pct_cols=["Cobertura %"],
-            ),
-            use_container_width=True,
-        )
+                tabla_abril = metas_abril.merge(perf_base, on="vendedor", how="left")
+                tabla_abril["venta_actual"] = pd.to_numeric(tabla_abril["venta_actual"], errors="coerce").fillna(0.0)
+                tabla_abril["var_pct"] = tabla_abril.apply(
+                    lambda r: safe_pct_change(r["venta_actual"], r["venta_abril_2025"]), axis=1
+                )
+                tabla_abril["cumplimiento_pct"] = tabla_abril.apply(
+                    lambda r: (r["venta_actual"] / r["objetivo"] * 100.0) if float(r["objetivo"]) > 0 else 0.0,
+                    axis=1,
+                )
 
-    st.caption("No puse columna de objetivo porque en este archivo no existe ninguna hoja ni campo de objetivo cargado.")
+                tabla_abril = tabla_abril.rename(columns={
+                    "nombre_meta": "Nombre",
+                    "venta_actual": "Venta ABRIL 2026",
+                    "venta_abril_2025": "Venta ABRIL 2025",
+                    "var_pct": "% subida/caída",
+                    "objetivo": "Objetivo",
+                    "cumplimiento_pct": "% cumplimiento",
+                })
+
+                tabla_abril = tabla_abril[[
+                    "vendedor", "Nombre", "Venta ABRIL 2026", "Venta ABRIL 2025", "% subida/caída", "Objetivo", "% cumplimiento"
+                ]].sort_values("Venta ABRIL 2026", ascending=False).reset_index(drop=True)
+
+                st.dataframe(
+                    styled_table(
+                        tabla_abril,
+                        money_cols=["Venta ABRIL 2026", "Venta ABRIL 2025", "Objetivo"],
+                        pct_cols=["% subida/caída", "% cumplimiento"],
+                    ),
+                    use_container_width=True,
+                )
+        else:
+            perf_display = perf_vendedores[["vendedor", "venta_actual", "clientes_actual", "clientes_asignados", "cobertura_pct", "ticket_promedio"]].copy()
+            perf_display = perf_display.rename(columns={
+                "venta_actual": f"Venta {mes}",
+                "clientes_actual": f"Clientes {mes}",
+                "clientes_asignados": "Asignados",
+                "cobertura_pct": "Cobertura %",
+                "ticket_promedio": "Ticket prom.",
+            })
+
+            st.dataframe(
+                styled_table(
+                    perf_display,
+                    money_cols=[f"Venta {mes}", "Ticket prom."],
+                    int_cols=[f"Clientes {mes}", "Asignados"],
+                    pct_cols=["Cobertura %"],
+                ),
+                use_container_width=True,
+            )
 
     st.divider()
     st.subheader("Mapa")
