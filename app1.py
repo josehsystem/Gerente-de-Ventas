@@ -112,6 +112,12 @@ def export_csv_url(sheet_id: str, gid: str = "0") -> str:
 def to_num(s):
     return pd.to_numeric(s, errors="coerce").fillna(0)
 
+def to_money_num(s):
+    s = pd.Series(s)
+    s = s.astype(str).str.strip()
+    s = s.str.replace(r"[^0-9.\-]", "", regex=True)
+    return pd.to_numeric(s, errors="coerce").fillna(0.0)
+
 def ensure_col(df_, col, default=""):
     if col not in df_.columns:
         df_[col] = default
@@ -450,8 +456,8 @@ def load_meta_abril():
     out = pd.DataFrame()
     out["vendedor"] = pd.to_numeric(df[col_vendedor], errors="coerce").round(0).astype("Int64").astype(str).str.replace("<NA>", "", regex=False).str.strip()
     out["nombre_meta"] = df[col_nombre].astype(str).fillna("").str.strip() if col_nombre else ""
-    out["venta_abril_2025"] = pd.to_numeric(df[col_abril_2025], errors="coerce").fillna(0.0)
-    out["objetivo"] = pd.to_numeric(df[col_objetivo], errors="coerce").fillna(0.0)
+    out["venta_abril_2025"] = to_money_num(df[col_abril_2025])
+    out["objetivo"] = to_money_num(df[col_objetivo])
 
     out = out[out["vendedor"] != ""].copy()
     out = out.drop_duplicates(subset=["vendedor"], keep="first").reset_index(drop=True)
@@ -1039,6 +1045,7 @@ def dashboard_screen(mes: str):
                 tabla_abril["var_pct"] = tabla_abril.apply(
                     lambda r: safe_pct_change(r["venta_actual"], r["venta_abril_2025"]), axis=1
                 )
+                tabla_abril["var_pct"] = pd.to_numeric(tabla_abril["var_pct"], errors="coerce")
                 tabla_abril["cumplimiento_pct"] = tabla_abril.apply(
                     lambda r: (r["venta_actual"] / r["objetivo"] * 100.0) if float(r["objetivo"]) > 0 else 0.0,
                     axis=1,
