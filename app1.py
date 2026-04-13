@@ -1,4 +1,5 @@
 
+
 import streamlit as st
 import pandas as pd
 import folium
@@ -884,14 +885,6 @@ def dashboard_screen(mes: str):
     )
     include_negative = st.checkbox("Incluir negados en negativo (ajustes/devoluciones)", value=False)
 
-    with st.expander("Parámetros de alerta", expanded=False):
-        a1, a2, a3 = st.columns(3)
-        with a1:
-            umbral_caida = st.number_input("Alerta caída de venta %", min_value=1.0, value=15.0, step=1.0)
-        with a2:
-            umbral_cobertura = st.number_input("Alerta cobertura menor a %", min_value=1.0, value=40.0, step=1.0)
-        with a3:
-            umbral_negado = st.number_input("Alerta negado mayor a %", min_value=0.5, value=8.0, step=0.5)
 
     vend_sel_str = [str(x).strip() for x in vendedor_sel]
 
@@ -988,47 +981,27 @@ def dashboard_screen(mes: str):
     }
 
     r1 = st.columns([2.0, 1.4, 1.5, 1.4, 1.4, 1.3])
-    r1[0].metric("Venta sin IVA", f"${venta_total:,.2f}", format_delta_pct(venta_var_pct, prev_mes))
-    r1[1].metric("Clientes con venta", f"{clientes_con_venta:,}", format_delta_num(clientes_var, prev_mes))
+    r1[0].metric("Venta sin IVA", f"${venta_total:,.2f}")
+    r1[1].metric("Clientes con venta", f"{clientes_con_venta:,}")
     r1[2].metric("Ticket prom.", f"${ticket_prom:,.2f}")
     r1[3].metric("Cobertura", f"{cobertura:,.1f}%")
     r1[4].metric("SKUs únicos", "N/D" if sku_unicos is None else f"{sku_unicos:,}")
-    r1[5].metric("Clientes nuevos", f"{clientes_nuevos_n:,}")
+    r1[5].metric("Clientes asignados", f"{clientes_asignados:,}")
 
     r2 = st.columns([1.8, 1.4, 1.4, 1.4, 1.4, 1.2])
     r2[0].metric("$ Negado", f"${negado_valor:,.2f}")
     r2[1].metric("% Negado", f"{pct_negado_vs_vendido:,.2f}%")
     r2[2].metric("Negados sin precio", f"{faltan_precios:,}")
-    r2[3].metric("Clientes perdidos", f"{clientes_perdidos_n:,}")
-    r2[4].metric("Valor perdido prev.", f"${valor_perdido_prev:,.2f}")
+    r2[3].metric("Clientes nuevos", f"{clientes_nuevos_n:,}")
+    r2[4].metric("Clientes perdidos", f"{clientes_perdidos_n:,}")
     with r2[5]:
         if st.button("📋 Ver detalle"):
             st.session_state.view = "negados"
             st.rerun()
 
-    alertas = []
-    if prev_mes and venta_var_pct is not None and venta_var_pct <= (-1 * float(umbral_caida)):
-        alertas.append(("error", f"Caída de venta de {abs(venta_var_pct):.1f}% contra {prev_mes}."))
-    if cobertura < float(umbral_cobertura):
-        alertas.append(("warning", f"Cobertura baja: {cobertura:.1f}% de clientes atendidos."))
-    if pct_negado_vs_vendido > float(umbral_negado):
-        alertas.append(("warning", f"Negados altos: {pct_negado_vs_vendido:.2f}% del vendido."))
-    if prev_mes and clientes_perdidos_n > 0:
-        alertas.append(("info", f"Hay {clientes_perdidos_n:,} clientes perdidos respecto a {prev_mes}."))
-
-    if alertas:
-        st.divider()
-        st.subheader("Alertas accionables")
-        for nivel, texto in alertas:
-            if nivel == "error":
-                st.error(texto)
-            elif nivel == "warning":
-                st.warning(texto)
-            else:
-                st.info(texto)
-
     st.divider()
-    st.subheader("Mapa")
+    st.subheader(f"Ventas {mes} por vendedor")
+    st.caption("Quité el comparativo visual contra el mes anterior. Aquí solo se muestra desempeño del mes actual.")
 
     map_c1, map_c2 = st.columns([1.4, 3.6])
     with map_c1:
@@ -1118,14 +1091,12 @@ def dashboard_screen(mes: str):
     )
 
     if perf_vendedores.empty:
-        st.info("No hay información suficiente para desempeño por vendedor.")
+        st.info("No hay información suficiente para ventas por vendedor.")
     else:
-        perf_display = perf_vendedores.rename(columns={
+        perf_display = perf_vendedores[["vendedor", "venta_actual", "clientes_actual", "clientes_asignados", "cobertura_pct", "ticket_promedio"]].copy()
+        perf_display = perf_display.rename(columns={
             "venta_actual": f"Venta {mes}",
-            "venta_anterior": f"Venta {prev_mes}" if prev_mes else "Venta anterior",
-            "var_pct": "Var %",
             "clientes_actual": f"Clientes {mes}",
-            "clientes_anterior": f"Clientes {prev_mes}" if prev_mes else "Clientes anterior",
             "clientes_asignados": "Asignados",
             "cobertura_pct": "Cobertura %",
             "ticket_promedio": "Ticket prom.",
@@ -1134,33 +1105,94 @@ def dashboard_screen(mes: str):
         st.dataframe(
             styled_table(
                 perf_display,
-                money_cols=[f"Venta {mes}", f"Venta {prev_mes}" if prev_mes else "Venta anterior", "Ticket prom."],
-                int_cols=[f"Clientes {mes}", f"Clientes {prev_mes}" if prev_mes else "Clientes anterior", "Asignados"],
-                pct_cols=["Var %", "Cobertura %"],
+                money_cols=[f"Venta {mes}", "Ticket prom."],
+                int_cols=[f"Clientes {mes}", "Asignados"],
+                pct_cols=["Cobertura %"],
             ),
             use_container_width=True,
         )
 
-    if prev_mes:
-        st.divider()
-        st.subheader(f"Clientes perdidos vs {prev_mes}")
-        if clientes_perdidos.empty:
-            st.success(f"No hay clientes perdidos contra {prev_mes} con los filtros actuales.")
-        else:
-            perdidos_display = clientes_perdidos.head(25).rename(columns={
-                "venta_anterior": f"Venta {prev_mes}",
-                "renglones": "Renglones",
-            })
+        st.info("No puse 'contra objetivo' porque en tu código actual no existe ninguna hoja ni columna de objetivo.")
 
-            st.dataframe(
-                styled_table(
-                    perdidos_display,
-                    money_cols=[f"Venta {prev_mes}"],
-                    int_cols=["Renglones"],
-                ),
-                use_container_width=True,
-            )
+    st.divider()
+    st.subheader("Mapa")
 
+    map_c1, map_c2 = st.columns([1.4, 3.6])
+    with map_c1:
+        cargar_mapa = st.checkbox("Cargar mapa interactivo", value=False)
+    with map_c2:
+        st.caption("El mapa queda apagado al entrar para que la pantalla cargue más rápido. Solo se construye si lo activas.")
+
+    if cargar_mapa:
+        base_for_center = df_sales if not df_sales.empty else clientes_scope if not clientes_scope.empty else clientes
+        center = [base_for_center["latitud"].mean(), base_for_center["longitud"].mean()]
+        m = folium.Map(location=center, zoom_start=11, tiles="OpenStreetMap")
+
+        layer_sales = folium.FeatureGroup(name="Clientes con venta")
+        layer_gray = folium.FeatureGroup(name="Clientes sin compra (del vendedor)")
+        layer_heat = folium.FeatureGroup(name="Heatmap")
+
+        color_map = make_color_map(df_sales["vendedor"]) if not df_sales.empty else {}
+
+        if not df_sales.empty:
+            for _, r in df_sales.iterrows():
+                vend = clean_text(r.get("vendedor", ""))
+                venta = float(r.get("venta_sin_iva", 0) or 0.0)
+                lat = float(r["latitud"])
+                lon = float(r["longitud"])
+                cve = clean_text(r.get("cve_cte", ""))
+                nombre = clean_text(r.get("nombre", ""))
+                label = f"{cve} - {nombre}" if nombre else f"{cve} - SIN NOMBRE"
+
+                popup_html = f"""
+                <b>Cliente:</b> {label}<br>
+                <b>Vendedor:</b> {vend}<br>
+                <b>Venta sin IVA:</b> ${venta:,.2f}
+                """
+
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=radius_from_sale(venta),
+                    color=color_map.get(vend, "blue"),
+                    fill=True,
+                    fill_opacity=0.75,
+                    popup=folium.Popup(popup_html, max_width=420),
+                    tooltip=folium.Tooltip(label, sticky=True),
+                ).add_to(layer_sales)
+
+            layer_sales.add_to(m)
+
+        if show_no_sales and not df_no_sales.empty:
+            gray_radius = radius_from_sale(gray_fake_sale, min_r=7, max_r=16)
+            for _, r in df_no_sales.iterrows():
+                lat = float(r["latitud"])
+                lon = float(r["longitud"])
+                cve = clean_text(r.get("cve_cte", ""))
+                nombre = clean_text(r.get("nombre", ""))
+                label = f"{cve} - {nombre}" if nombre else f"{cve} - SIN NOMBRE"
+                popup_html = f"<b>Cliente:</b> {label}<br><b>Sin compra</b> con los filtros actuales."
+
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=gray_radius,
+                    color="gray",
+                    fill=True,
+                    fill_opacity=0.35,
+                    tooltip=folium.Tooltip(label, sticky=True),
+                    popup=folium.Popup(popup_html, max_width=360),
+                ).add_to(layer_gray)
+
+            layer_gray.add_to(m)
+
+        if heat and not df_sales.empty:
+            heat_data = df_sales[["latitud", "longitud", "venta_sin_iva"]].dropna()
+            HeatMap(heat_data.values.tolist(), radius=18, blur=15, max_zoom=13).add_to(layer_heat)
+            layer_heat.add_to(m)
+
+        folium.LayerControl(collapsed=True).add_to(m)
+        st_folium(m, width="stretch", height=650)
+    else:
+        st.info("Mapa apagado. Actívalo solo cuando quieras revisarlo.")
     st.divider()
     st.subheader("Top oportunidades por negados")
     if err_neg:
