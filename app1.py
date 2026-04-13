@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import folium
@@ -831,12 +830,6 @@ def dashboard_screen(mes: str):
     ventas = load_ventas(cfg["sheet_id"], cfg["tab"])
     clientes = load_clientes()
 
-    prev_mes = get_prev_month(mes)
-    ventas_prev = pd.DataFrame(columns=ventas.columns)
-    if prev_mes and prev_mes in VENTAS_MESES:
-        prev_cfg = VENTAS_MESES[prev_mes]
-        ventas_prev = load_ventas(prev_cfg["sheet_id"], prev_cfg["tab"])
-
     neg_cfg = get_negados_cfg(mes)
     negados_df, err_neg = load_negados_serur(neg_cfg["sheet_id"], neg_cfg["tab"])
     precios_df, err_pre = load_precios_serur()
@@ -848,10 +841,8 @@ def dashboard_screen(mes: str):
             st.session_state.view = "pick_month"
             st.rerun()
     with topbar2:
-        titulo = f"Mapa de Ventas | {mes}"
-        if prev_mes:
-            titulo += f" vs {prev_mes}"
-        st.title(titulo)
+        st.title(f"Panel Comercial | {mes}")
+        st.caption("Vista del mes actual sin comparativo contra meses anteriores.")
 
     vendedores = sorted([v for v in ventas["vendedor"].dropna().unique().tolist() if clean_text(v) != ""])
     if not vendedores:
@@ -884,19 +875,9 @@ def dashboard_screen(mes: str):
     )
     include_negative = st.checkbox("Incluir negados en negativo (ajustes/devoluciones)", value=False)
 
-    with st.expander("Parámetros de alerta", expanded=False):
-        a1, a2, a3 = st.columns(3)
-        with a1:
-            umbral_caida = st.number_input("Alerta caída de venta %", min_value=1.0, value=15.0, step=1.0)
-        with a2:
-            umbral_cobertura = st.number_input("Alerta cobertura menor a %", min_value=1.0, value=40.0, step=1.0)
-        with a3:
-            umbral_negado = st.number_input("Alerta negado mayor a %", min_value=0.5, value=8.0, step=0.5)
-
     vend_sel_str = [str(x).strip() for x in vendedor_sel]
 
     dfv = filter_ventas_contexto(ventas, vendedores=vend_sel_str, especies=especie_sel)
-    dfv_prev = filter_ventas_contexto(ventas_prev, vendedores=vend_sel_str, especies=especie_sel) if prev_mes else pd.DataFrame(columns=ventas.columns)
 
     sku_unicos = None
     if not dfv.empty:
@@ -932,16 +913,12 @@ def dashboard_screen(mes: str):
     if show_no_sales and max_no_sales > 0 and len(df_no_sales) > max_no_sales:
         df_no_sales = df_no_sales.head(int(max_no_sales))
 
-    venta_total = float(df_sales["venta_sin_iva"].sum()) if not df_sales.empty else 0.0
-    clientes_con_venta = int(df_sales["cve_cte"].nunique()) if not df_sales.empty else 0
+    venta_total = float(dfv["venta_sin_iva"].sum()) if not dfv.empty else 0.0
+    clientes_con_venta = int(dfv["cve_cte"].astype(str).nunique()) if not dfv.empty else 0
     ticket_prom = (venta_total / clientes_con_venta) if clientes_con_venta else 0.0
     clientes_asignados = int(clientes_scope["cve_cte"].nunique()) if not clientes_scope.empty else 0
     cobertura = (clientes_con_venta / clientes_asignados * 100) if clientes_asignados else 0.0
-
-    venta_total_prev = float(dfv_prev["venta_sin_iva"].sum()) if not dfv_prev.empty else 0.0
-    clientes_prev = int(dfv_prev["cve_cte"].astype(str).nunique()) if not dfv_prev.empty else 0
-    venta_var_pct = safe_pct_change(venta_total, venta_total_prev)
-    clientes_var = clientes_con_venta - clientes_prev
+    clientes_sin_compra = int(df_no_sales_all["cve_cte"].astype(str).nunique()) if not df_no_sales_all.empty else 0
 
     selected_cve_vnd = None
     if modo == "Elegir":
@@ -966,18 +943,6 @@ def dashboard_screen(mes: str):
     faltan_precios = int((oportunidades_negados["precio"] <= 0).sum()) if not oportunidades_negados.empty else 0
     pct_negado_vs_vendido = (negado_valor / venta_total * 100) if venta_total > 0 else 0.0
 
-    clientes_perdidos = build_clientes_perdidos(dfv, dfv_prev, clientes) if prev_mes else pd.DataFrame(
-        columns=["cve_cte", "nombre", "vendedor", "venta_anterior", "renglones", "especies"]
-    )
-    clientes_perdidos_n = len(clientes_perdidos)
-    valor_perdido_prev = float(clientes_perdidos["venta_anterior"].sum()) if not clientes_perdidos.empty else 0.0
-
-    clientes_nuevos_n = 0
-    if prev_mes:
-        actuales = set(dfv["cve_cte"].astype(str).str.strip().tolist()) if not dfv.empty else set()
-        previos = set(dfv_prev["cve_cte"].astype(str).str.strip().tolist()) if not dfv_prev.empty else set()
-        clientes_nuevos_n = len(actuales - previos)
-
     st.session_state.last_filters = {
         "selected_cve_vnd": selected_cve_vnd,
         "include_negative": include_negative,
@@ -988,44 +953,57 @@ def dashboard_screen(mes: str):
     }
 
     r1 = st.columns([2.0, 1.4, 1.5, 1.4, 1.4, 1.3])
-    r1[0].metric("Venta sin IVA", f"${venta_total:,.2f}", format_delta_pct(venta_var_pct, prev_mes))
-    r1[1].metric("Clientes con venta", f"{clientes_con_venta:,}", format_delta_num(clientes_var, prev_mes))
+    r1[0].metric("Venta sin IVA", f"${venta_total:,.2f}")
+    r1[1].metric("Clientes con venta", f"{clientes_con_venta:,}")
     r1[2].metric("Ticket prom.", f"${ticket_prom:,.2f}")
     r1[3].metric("Cobertura", f"{cobertura:,.1f}%")
     r1[4].metric("SKUs únicos", "N/D" if sku_unicos is None else f"{sku_unicos:,}")
-    r1[5].metric("Clientes nuevos", f"{clientes_nuevos_n:,}")
+    r1[5].metric("Clientes asignados", f"{clientes_asignados:,}")
 
     r2 = st.columns([1.8, 1.4, 1.4, 1.4, 1.4, 1.2])
     r2[0].metric("$ Negado", f"${negado_valor:,.2f}")
     r2[1].metric("% Negado", f"{pct_negado_vs_vendido:,.2f}%")
     r2[2].metric("Negados sin precio", f"{faltan_precios:,}")
-    r2[3].metric("Clientes perdidos", f"{clientes_perdidos_n:,}")
-    r2[4].metric("Valor perdido prev.", f"${valor_perdido_prev:,.2f}")
+    r2[3].metric("Clientes sin compra", f"{clientes_sin_compra:,}")
+    r2[4].metric("Vendedores filtrados", f"{len(vend_sel_str):,}")
     with r2[5]:
         if st.button("📋 Ver detalle"):
             st.session_state.view = "negados"
             st.rerun()
 
-    alertas = []
-    if prev_mes and venta_var_pct is not None and venta_var_pct <= (-1 * float(umbral_caida)):
-        alertas.append(("error", f"Caída de venta de {abs(venta_var_pct):.1f}% contra {prev_mes}."))
-    if cobertura < float(umbral_cobertura):
-        alertas.append(("warning", f"Cobertura baja: {cobertura:.1f}% de clientes atendidos."))
-    if pct_negado_vs_vendido > float(umbral_negado):
-        alertas.append(("warning", f"Negados altos: {pct_negado_vs_vendido:.2f}% del vendido."))
-    if prev_mes and clientes_perdidos_n > 0:
-        alertas.append(("info", f"Hay {clientes_perdidos_n:,} clientes perdidos respecto a {prev_mes}."))
+    st.divider()
+    st.subheader(f"Ventas {mes} por vendedor")
 
-    if alertas:
-        st.divider()
-        st.subheader("Alertas accionables")
-        for nivel, texto in alertas:
-            if nivel == "error":
-                st.error(texto)
-            elif nivel == "warning":
-                st.warning(texto)
-            else:
-                st.info(texto)
+    perf_vendedores = build_vendor_performance(
+        ventas_actual=filter_ventas_contexto(ventas, vendedores=vend_sel_str if modo == "Elegir" else vendedores, especies=especie_sel),
+        ventas_anterior=pd.DataFrame(columns=ventas.columns),
+        clientes_df=clientes,
+        vendedores_objetivo=vend_sel_str if modo == "Elegir" else vendedores,
+    )
+
+    if perf_vendedores.empty:
+        st.info("No hay información suficiente para ventas por vendedor.")
+    else:
+        perf_display = perf_vendedores[["vendedor", "venta_actual", "clientes_actual", "clientes_asignados", "cobertura_pct", "ticket_promedio"]].copy()
+        perf_display = perf_display.rename(columns={
+            "venta_actual": f"Venta {mes}",
+            "clientes_actual": f"Clientes {mes}",
+            "clientes_asignados": "Asignados",
+            "cobertura_pct": "Cobertura %",
+            "ticket_promedio": "Ticket prom.",
+        })
+
+        st.dataframe(
+            styled_table(
+                perf_display,
+                money_cols=[f"Venta {mes}", "Ticket prom."],
+                int_cols=[f"Clientes {mes}", "Asignados"],
+                pct_cols=["Cobertura %"],
+            ),
+            use_container_width=True,
+        )
+
+    st.caption("No puse columna de objetivo porque en este archivo no existe ninguna hoja ni campo de objetivo cargado.")
 
     st.divider()
     st.subheader("Mapa")
@@ -1106,60 +1084,6 @@ def dashboard_screen(mes: str):
         st_folium(m, width="stretch", height=650)
     else:
         st.info("Mapa apagado. Actívalo solo cuando quieras revisarlo.")
-
-    st.divider()
-    st.subheader("Desempeño por vendedor")
-    vendedores_tabla = vend_sel_str if modo == "Elegir" else vendedores
-    perf_vendedores = build_vendor_performance(
-        ventas_actual=filter_ventas_contexto(ventas, vendedores=vendedores_tabla, especies=especie_sel),
-        ventas_anterior=filter_ventas_contexto(ventas_prev, vendedores=vendedores_tabla, especies=especie_sel) if prev_mes else pd.DataFrame(columns=ventas.columns),
-        clientes_df=clientes,
-        vendedores_objetivo=vendedores_tabla,
-    )
-
-    if perf_vendedores.empty:
-        st.info("No hay información suficiente para desempeño por vendedor.")
-    else:
-        perf_display = perf_vendedores.rename(columns={
-            "venta_actual": f"Venta {mes}",
-            "venta_anterior": f"Venta {prev_mes}" if prev_mes else "Venta anterior",
-            "var_pct": "Var %",
-            "clientes_actual": f"Clientes {mes}",
-            "clientes_anterior": f"Clientes {prev_mes}" if prev_mes else "Clientes anterior",
-            "clientes_asignados": "Asignados",
-            "cobertura_pct": "Cobertura %",
-            "ticket_promedio": "Ticket prom.",
-        })
-
-        st.dataframe(
-            styled_table(
-                perf_display,
-                money_cols=[f"Venta {mes}", f"Venta {prev_mes}" if prev_mes else "Venta anterior", "Ticket prom."],
-                int_cols=[f"Clientes {mes}", f"Clientes {prev_mes}" if prev_mes else "Clientes anterior", "Asignados"],
-                pct_cols=["Var %", "Cobertura %"],
-            ),
-            use_container_width=True,
-        )
-
-    if prev_mes:
-        st.divider()
-        st.subheader(f"Clientes perdidos vs {prev_mes}")
-        if clientes_perdidos.empty:
-            st.success(f"No hay clientes perdidos contra {prev_mes} con los filtros actuales.")
-        else:
-            perdidos_display = clientes_perdidos.head(25).rename(columns={
-                "venta_anterior": f"Venta {prev_mes}",
-                "renglones": "Renglones",
-            })
-
-            st.dataframe(
-                styled_table(
-                    perdidos_display,
-                    money_cols=[f"Venta {prev_mes}"],
-                    int_cols=["Renglones"],
-                ),
-                use_container_width=True,
-            )
 
     st.divider()
     st.subheader("Top oportunidades por negados")
