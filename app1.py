@@ -304,6 +304,29 @@ def build_oportunidades_negados(negados_df, precios_df, selected_cve_vnd=None, i
 
     return agg.sort_values("valor", ascending=False).reset_index(drop=True)
 
+def styled_table(df, money_cols=None, int_cols=None, pct_cols=None, float_cols=None):
+    money_cols = [c for c in (money_cols or []) if c in df.columns]
+    int_cols = [c for c in (int_cols or []) if c in df.columns]
+    pct_cols = [c for c in (pct_cols or []) if c in df.columns]
+    float_cols = [c for c in (float_cols or []) if c in df.columns]
+
+    formats = {}
+    for c in money_cols:
+        formats[c] = "${:,.2f}"
+    for c in int_cols:
+        formats[c] = "{:,.0f}"
+    for c in pct_cols:
+        formats[c] = "{:,.2f}%"
+    for c in float_cols:
+        formats[c] = "{:,.2f}"
+
+    styler = df.style.format(formats, na_rep="")
+    try:
+        styler = styler.hide(axis="index")
+    except Exception:
+        pass
+    return styler
+
 # =========================
 # DATA SOURCES
 # =========================
@@ -656,18 +679,27 @@ def negados_detail_screen():
 
     st.divider()
     st.subheader("Detalle")
+
+    det_display = det.rename(columns={
+        "cve_art": "cve_art",
+        "descri": "descri",
+        "cant_negada": "cant_negada",
+        "precio": "precio",
+        "valor": "valor",
+        "pct_total": "% del total",
+        "folios": "Folios",
+        "vendedores": "Vendedores",
+    })
+
     st.dataframe(
-        det,
+        styled_table(
+            det_display,
+            money_cols=["precio", "valor"],
+            int_cols=["Folios", "Vendedores"],
+            pct_cols=["% del total"],
+            float_cols=["cant_negada"],
+        ),
         use_container_width=True,
-        hide_index=True,
-        column_config={
-            "cant_negada": st.column_config.NumberColumn("cant_negada", format="%0.2f"),
-            "precio": st.column_config.NumberColumn("precio", format="$ %0.2f"),
-            "valor": st.column_config.NumberColumn("valor", format="$ %0.2f"),
-            "pct_total": st.column_config.NumberColumn("% del total", format="%0.2f"),
-            "folios": st.column_config.NumberColumn("Folios", format="%d"),
-            "vendedores": st.column_config.NumberColumn("Vendedores", format="%d"),
-        },
     )
 
 # =========================
@@ -740,10 +772,11 @@ def especies_screen(mes: str):
     else:
         df_f = pd.DataFrame(faltantes, columns=["especie", "venta_vendedor"])
         st.dataframe(
-            df_f.sort_values("venta_vendedor", ascending=True),
+            styled_table(
+                df_f.sort_values("venta_vendedor", ascending=True).rename(columns={"venta_vendedor": "Venta vendedor"}),
+                money_cols=["Venta vendedor"],
+            ),
             use_container_width=True,
-            hide_index=True,
-            column_config={"venta_vendedor": st.column_config.NumberColumn("Venta vendedor", format="$ %0.2f")},
         )
 
     st.divider()
@@ -772,16 +805,22 @@ def especies_screen(mes: str):
 
     st.divider()
     st.subheader("Tabla (por si la ocupas)")
+
+    by_esp_display = by_esp.rename(columns={
+        "venta_sin_iva": "Venta sin IVA",
+        "pct_vnd": "% del vendedor",
+        "clientes": "Clientes",
+        "renglones": "Renglones",
+    })
+
     st.dataframe(
-        by_esp,
+        styled_table(
+            by_esp_display,
+            money_cols=["Venta sin IVA"],
+            int_cols=["Clientes", "Renglones"],
+            pct_cols=["% del vendedor"],
+        ),
         use_container_width=True,
-        hide_index=True,
-        column_config={
-            "venta_sin_iva": st.column_config.NumberColumn("Venta sin IVA", format="$ %0.2f"),
-            "pct_vnd": st.column_config.NumberColumn("% del vendedor", format="%0.2f"),
-            "clientes": st.column_config.NumberColumn("Clientes", format="%d"),
-            "renglones": st.column_config.NumberColumn("Renglones", format="%d"),
-        },
     )
 
 # =========================
@@ -989,76 +1028,84 @@ def dashboard_screen(mes: str):
                 st.info(texto)
 
     st.divider()
-
-    base_for_center = df_sales if not df_sales.empty else clientes_scope if not clientes_scope.empty else clientes
-    center = [base_for_center["latitud"].mean(), base_for_center["longitud"].mean()]
-    m = folium.Map(location=center, zoom_start=11, tiles="OpenStreetMap")
-
-    layer_sales = folium.FeatureGroup(name="Clientes con venta")
-    layer_gray = folium.FeatureGroup(name="Clientes sin compra (del vendedor)")
-    layer_heat = folium.FeatureGroup(name="Heatmap")
-
-    color_map = make_color_map(df_sales["vendedor"]) if not df_sales.empty else {}
-
-    if not df_sales.empty:
-        for _, r in df_sales.iterrows():
-            vend = clean_text(r.get("vendedor", ""))
-            venta = float(r.get("venta_sin_iva", 0) or 0.0)
-            lat = float(r["latitud"])
-            lon = float(r["longitud"])
-            cve = clean_text(r.get("cve_cte", ""))
-            nombre = clean_text(r.get("nombre", ""))
-            label = f"{cve} - {nombre}" if nombre else f"{cve} - SIN NOMBRE"
-
-            popup_html = f"""
-            <b>Cliente:</b> {label}<br>
-            <b>Vendedor:</b> {vend}<br>
-            <b>Venta sin IVA:</b> ${venta:,.2f}
-            """
-
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=radius_from_sale(venta),
-                color=color_map.get(vend, "blue"),
-                fill=True,
-                fill_opacity=0.75,
-                popup=folium.Popup(popup_html, max_width=420),
-                tooltip=folium.Tooltip(label, sticky=True),
-            ).add_to(layer_sales)
-
-        layer_sales.add_to(m)
-
-    if show_no_sales and not df_no_sales.empty:
-        gray_radius = radius_from_sale(gray_fake_sale, min_r=7, max_r=16)
-        for _, r in df_no_sales.iterrows():
-            lat = float(r["latitud"])
-            lon = float(r["longitud"])
-            cve = clean_text(r.get("cve_cte", ""))
-            nombre = clean_text(r.get("nombre", ""))
-            label = f"{cve} - {nombre}" if nombre else f"{cve} - SIN NOMBRE"
-            popup_html = f"<b>Cliente:</b> {label}<br><b>Sin compra</b> con los filtros actuales."
-
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=gray_radius,
-                color="gray",
-                fill=True,
-                fill_opacity=0.35,
-                tooltip=folium.Tooltip(label, sticky=True),
-                popup=folium.Popup(popup_html, max_width=360),
-            ).add_to(layer_gray)
-
-        layer_gray.add_to(m)
-
-    if heat and not df_sales.empty:
-        heat_data = df_sales[["latitud", "longitud", "venta_sin_iva"]].dropna()
-        HeatMap(heat_data.values.tolist(), radius=18, blur=15, max_zoom=13).add_to(layer_heat)
-        layer_heat.add_to(m)
-
-    folium.LayerControl(collapsed=True).add_to(m)
-
     st.subheader("Mapa")
-    st_folium(m, width="stretch", height=650)
+
+    map_c1, map_c2 = st.columns([1.4, 3.6])
+    with map_c1:
+        cargar_mapa = st.checkbox("Cargar mapa interactivo", value=False)
+    with map_c2:
+        st.caption("El mapa queda apagado al entrar para que la pantalla cargue más rápido. Solo se construye si lo activas.")
+
+    if cargar_mapa:
+        base_for_center = df_sales if not df_sales.empty else clientes_scope if not clientes_scope.empty else clientes
+        center = [base_for_center["latitud"].mean(), base_for_center["longitud"].mean()]
+        m = folium.Map(location=center, zoom_start=11, tiles="OpenStreetMap")
+
+        layer_sales = folium.FeatureGroup(name="Clientes con venta")
+        layer_gray = folium.FeatureGroup(name="Clientes sin compra (del vendedor)")
+        layer_heat = folium.FeatureGroup(name="Heatmap")
+
+        color_map = make_color_map(df_sales["vendedor"]) if not df_sales.empty else {}
+
+        if not df_sales.empty:
+            for _, r in df_sales.iterrows():
+                vend = clean_text(r.get("vendedor", ""))
+                venta = float(r.get("venta_sin_iva", 0) or 0.0)
+                lat = float(r["latitud"])
+                lon = float(r["longitud"])
+                cve = clean_text(r.get("cve_cte", ""))
+                nombre = clean_text(r.get("nombre", ""))
+                label = f"{cve} - {nombre}" if nombre else f"{cve} - SIN NOMBRE"
+
+                popup_html = f"""
+                <b>Cliente:</b> {label}<br>
+                <b>Vendedor:</b> {vend}<br>
+                <b>Venta sin IVA:</b> ${venta:,.2f}
+                """
+
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=radius_from_sale(venta),
+                    color=color_map.get(vend, "blue"),
+                    fill=True,
+                    fill_opacity=0.75,
+                    popup=folium.Popup(popup_html, max_width=420),
+                    tooltip=folium.Tooltip(label, sticky=True),
+                ).add_to(layer_sales)
+
+            layer_sales.add_to(m)
+
+        if show_no_sales and not df_no_sales.empty:
+            gray_radius = radius_from_sale(gray_fake_sale, min_r=7, max_r=16)
+            for _, r in df_no_sales.iterrows():
+                lat = float(r["latitud"])
+                lon = float(r["longitud"])
+                cve = clean_text(r.get("cve_cte", ""))
+                nombre = clean_text(r.get("nombre", ""))
+                label = f"{cve} - {nombre}" if nombre else f"{cve} - SIN NOMBRE"
+                popup_html = f"<b>Cliente:</b> {label}<br><b>Sin compra</b> con los filtros actuales."
+
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=gray_radius,
+                    color="gray",
+                    fill=True,
+                    fill_opacity=0.35,
+                    tooltip=folium.Tooltip(label, sticky=True),
+                    popup=folium.Popup(popup_html, max_width=360),
+                ).add_to(layer_gray)
+
+            layer_gray.add_to(m)
+
+        if heat and not df_sales.empty:
+            heat_data = df_sales[["latitud", "longitud", "venta_sin_iva"]].dropna()
+            HeatMap(heat_data.values.tolist(), radius=18, blur=15, max_zoom=13).add_to(layer_heat)
+            layer_heat.add_to(m)
+
+        folium.LayerControl(collapsed=True).add_to(m)
+        st_folium(m, width="stretch", height=650)
+    else:
+        st.info("Mapa apagado. Actívalo solo cuando quieras revisarlo.")
 
     st.divider()
     st.subheader("Desempeño por vendedor")
@@ -1073,20 +1120,25 @@ def dashboard_screen(mes: str):
     if perf_vendedores.empty:
         st.info("No hay información suficiente para desempeño por vendedor.")
     else:
+        perf_display = perf_vendedores.rename(columns={
+            "venta_actual": f"Venta {mes}",
+            "venta_anterior": f"Venta {prev_mes}" if prev_mes else "Venta anterior",
+            "var_pct": "Var %",
+            "clientes_actual": f"Clientes {mes}",
+            "clientes_anterior": f"Clientes {prev_mes}" if prev_mes else "Clientes anterior",
+            "clientes_asignados": "Asignados",
+            "cobertura_pct": "Cobertura %",
+            "ticket_promedio": "Ticket prom.",
+        })
+
         st.dataframe(
-            perf_vendedores,
+            styled_table(
+                perf_display,
+                money_cols=[f"Venta {mes}", f"Venta {prev_mes}" if prev_mes else "Venta anterior", "Ticket prom."],
+                int_cols=[f"Clientes {mes}", f"Clientes {prev_mes}" if prev_mes else "Clientes anterior", "Asignados"],
+                pct_cols=["Var %", "Cobertura %"],
+            ),
             use_container_width=True,
-            hide_index=True,
-            column_config={
-                "venta_actual": st.column_config.NumberColumn(f"Venta {mes}", format="$ %0.2f"),
-                "venta_anterior": st.column_config.NumberColumn(f"Venta {prev_mes}" if prev_mes else "Venta anterior", format="$ %0.2f"),
-                "var_pct": st.column_config.NumberColumn("Var %", format="%0.2f"),
-                "clientes_actual": st.column_config.NumberColumn(f"Clientes {mes}", format="%d"),
-                "clientes_anterior": st.column_config.NumberColumn(f"Clientes {prev_mes}" if prev_mes else "Clientes anterior", format="%d"),
-                "clientes_asignados": st.column_config.NumberColumn("Asignados", format="%d"),
-                "cobertura_pct": st.column_config.NumberColumn("Cobertura %", format="%0.2f"),
-                "ticket_promedio": st.column_config.NumberColumn("Ticket prom.", format="$ %0.2f"),
-            },
         )
 
     if prev_mes:
@@ -1095,14 +1147,18 @@ def dashboard_screen(mes: str):
         if clientes_perdidos.empty:
             st.success(f"No hay clientes perdidos contra {prev_mes} con los filtros actuales.")
         else:
+            perdidos_display = clientes_perdidos.head(25).rename(columns={
+                "venta_anterior": f"Venta {prev_mes}",
+                "renglones": "Renglones",
+            })
+
             st.dataframe(
-                clientes_perdidos.head(25),
+                styled_table(
+                    perdidos_display,
+                    money_cols=[f"Venta {prev_mes}"],
+                    int_cols=["Renglones"],
+                ),
                 use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "venta_anterior": st.column_config.NumberColumn(f"Venta {prev_mes}", format="$ %0.2f"),
-                    "renglones": st.column_config.NumberColumn("Renglones", format="%d"),
-                },
             )
 
     st.divider()
@@ -1114,17 +1170,22 @@ def dashboard_screen(mes: str):
     elif oportunidades_negados.empty:
         st.info("No hay negados para mostrar con los filtros actuales.")
     else:
+        oportunidades_display = oportunidades_negados.head(25).rename(columns={
+            "cant_negada": "Cant. negada",
+            "precio": "Precio",
+            "valor": "Valor oportunidad",
+            "folios": "Folios",
+            "vendedores": "Vendedores",
+        })
+
         st.dataframe(
-            oportunidades_negados.head(25),
+            styled_table(
+                oportunidades_display,
+                money_cols=["Precio", "Valor oportunidad"],
+                int_cols=["Folios", "Vendedores"],
+                float_cols=["Cant. negada"],
+            ),
             use_container_width=True,
-            hide_index=True,
-            column_config={
-                "cant_negada": st.column_config.NumberColumn("Cant. negada", format="%0.2f"),
-                "precio": st.column_config.NumberColumn("Precio", format="$ %0.2f"),
-                "valor": st.column_config.NumberColumn("Valor oportunidad", format="$ %0.2f"),
-                "folios": st.column_config.NumberColumn("Folios", format="%d"),
-                "vendedores": st.column_config.NumberColumn("Vendedores", format="%d"),
-            },
         )
 
     if show_no_sales:
